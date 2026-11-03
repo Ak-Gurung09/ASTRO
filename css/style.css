@@ -317,6 +317,8 @@ body.joy-off .joystick { display: none; }
 table.keys { width: 100%; border-collapse: collapse; font-size: .9rem; }
 table.keys td { padding: 6px 4px; border-bottom: 1px solid rgba(255,255,255,.06); vertical-align: top; }
 table.keys td:first-child { width: 44%; }
+table.keys.credits td:first-child { width: 24%; }
+table.keys.credits small { line-height: 1.35; }
 
 .complete-modal { text-align: center; }
 .complete-modal .big-ic { font-size: 4rem; animation: popIc .8s cubic-bezier(.2,1.6,.4,1) both; display: inline-block; }

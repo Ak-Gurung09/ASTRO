@@ -18,7 +18,7 @@ Progress saves automatically to `localStorage` on the device. You can wipe it wi
 
 ---
 
-## Graphics and animation (Phase 3)
+## Graphics and animation (Phases 3 and 4)
 
 * **Astronaut**: a fully jointed suit (hips, spine, shoulders, elbows, knees, ankles) with a gold reflective visor, life-support pack, chest control box, hoses and quilted fabric. The animator blends idle breathing, a walk whose stride is tied to distance (no foot sliding), the low-gravity "lope" hop (cadence follows the world's gravity), crouch, jump, landing squash, sliding and the seated driving pose.
 * **Movement**: the astronaut turns smoothly and leans into turns instead of snapping, the camera drifts behind you while you walk or drive, and the field of view widens a little at speed.
@@ -26,6 +26,7 @@ Progress saves automatically to `localStorage` on the device. You can wipe it wi
 * **Models**: rounded, textured rover with wire-mesh tyres, fenders and independent suspension that follows the ground under each wheel; crinkled gold foil on the Lunar Module and lander; fractured, noise-displaced rocks with a grain texture; reflections from a small environment map built from each world's own sky.
 * **Ground**: the surface grain is sampled at three scales so the terrain no longer shows a repeating tile.
 * **Solar system**: the Sun boils (animated granulation with limb darkening), rocky and icy worlds have surface relief that shows along the terminator, Earth's oceans glint in the Sun and its cities glow on the night side.
+* **Real moon maps (Phase 4)**: all ten moons use real global maps instead of generated ones: the Moon (LRO camera data), Phobos, Io, Europa, Ganymede, Callisto, Titan, Enceladus, Triton and Charon. The maps are embedded in the game (about 1 MB), so it still works offline and from a double-clicked `index.html`. If a map fails to decode, that moon keeps its generated texture. Sources, authors and licences are in `textures/moons/CREDITS.md` and in **Help → Image credits**. Two of the maps (Moon and Callisto) are CC BY-SA.
 
 ## 2. Gameplay summary
 

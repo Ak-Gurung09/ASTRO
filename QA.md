@@ -1,4 +1,4 @@
-# ASTRO LAB — QA checklist (Phases 1 to 3)
+# ASTRO LAB — QA checklist (Phases 1 to 4)
 
 I tested in headless Chromium (Playwright) at desktop 1366×820 and on an iPhone 13 profile (390×844, touch). The scripted runs used real mouse, keyboard and tap input wherever possible.
 
@@ -45,6 +45,15 @@ I tested in headless Chromium (Playwright) at desktop 1366×820 and on an iPhone
 | G5 | Smooth turning and camera follow | ✅ Pass | Turning right while walking turned the astronaut gradually (about 7 rad/s maximum); the camera swung behind within a few seconds |
 | G6 | Solar system look | ✅ Pass | Screenshots of the Sun, Earth (day and night side), Moon, Mars and Jupiter |
 | G7 | Phone layout and single-file build | ✅ Pass | iPhone 13 profile, no horizontal overflow, joystick moves the astronaut. The bundled `index.html` opens from `file://` and lands on the Moon |
+
+## Phase 4: real moon maps
+
+| # | Check | Result | How it was checked |
+|---|---|---|---|
+| M1 | All 10 moons load a real map | ✅ Pass | Boot reports the 10 ids as upgraded. Close-up screenshots of every moon in the 3D view, lit side towards the camera |
+| M2 | Fallback to generated textures | ✅ Pass | With `moonMaps.js` blocked (404) the game boots and every moon keeps its generated texture. With one corrupted image only that moon (Io) falls back. A console warning is logged |
+| M3 | Quality tiers | ✅ Pass | Low quality caps maps at 512 px wide; High uses 2048 for the Moon and the native size for the rest |
+| M4 | Credits | ✅ Pass | Help → Image credits lists all 10 maps with source and licence, marking any that fell back to generated |
 
 ## Known limits
 * The headless test browser renders WebGL in software (about 7 fps for the 3D view), so I could not measure real-GPU frame rate here. The 2D simulations ran at about 60 fps. Auto quality lowers the resolution if the frame rate drops below 40 fps.

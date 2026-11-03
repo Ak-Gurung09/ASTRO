@@ -5,6 +5,7 @@ import { CATEGORY_LABELS, BADGES, BADGE_MAP } from '../data/missions.js';
 import { BODIES, BODY_MAP, TRUE_SCALE } from '../data/solarSystem.js';
 import { DEEP_OBJECTS } from '../data/objects.js';
 import { ARCHIVE } from '../data/archive.js';
+import { MOON_CREDITS, MOON_CREDIT_INTRO } from '../data/moonCredits.js';
 
 let app = null;
 export function initModals(a) { app = a; }
@@ -188,7 +189,10 @@ export function openHelp() {
       h('h2', {}, '🎯 How to play'), h('ol', {}, h('li', {}, 'Follow the objective in the Mission Tracker (top-right).'), h('li', {}, 'A yellow ◆ marker or edge arrow points to your target.'), h('li', {}, 'Select a world, press Travel (F), then Scan it.'), h('li', {}, 'Pass its knowledge check to earn XP and cards.'), h('li', {}, 'Visit the Lab, Archive and Explorer for more missions.')))),
     h('h2', {}, '📏 About scale & time'),
     h('p', {}, 'Planet sizes in the 3D view are enlarged and distances compressed so that everything fits on screen; this is not physically to scale. Use the 📏 Scale tool for true proportions. Orbital periods are real, and starting positions approximate where planets are today (circular orbits, all drawn in one plane). In time-lapse, very fast moon orbits and planet spins are slowed down for comfortable viewing.'),
-    h('p', { class: 'muted tiny' }, 'Note: browsers reserve some shortcuts such as Ctrl + W. Use Ctrl with the arrow keys for fine movement.')) });
+    h('p', { class: 'muted tiny' }, 'Note: browsers reserve some shortcuts such as Ctrl + W. Use Ctrl with the arrow keys for fine movement.'),
+    h('h2', {}, '🖼️ Image credits'), h('p', { class: 'muted tiny' }, MOON_CREDIT_INTRO),
+    h('table', { class: 'keys credits' }, h('tbody', {}, MOON_CREDITS.map(c => h('tr', {}, h('td', {}, h('b', {}, c.name), (app.realMaps || []).includes(c.id) ? '' : h('small', { class: 'muted' }, ' (generated)')), h('td', {}, c.source, h('br'), h('small', { class: 'muted' }, `${c.licence}${c.note ? ' · ' + c.note : ''}`)))))),
+    h('p', { class: 'muted tiny' }, 'Full notes on each map: textures/moons/CREDITS.md in the game folder.')) });
 }
 
 // ---------------- Settings ----------------

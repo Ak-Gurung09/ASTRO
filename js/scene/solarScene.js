@@ -61,7 +61,7 @@ export class SolarScene {
 
   _texture(id) {
     const c = this.textures[id]; if (!c) return null;
-    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 4; return t;
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = Math.min(8, this.renderer.capabilities.getMaxAnisotropy()); return t;
   }
 
   _initScene() {

@@ -2,6 +2,7 @@
 import { $, $$, h, openModal, closeTopModal, modalOpen, closeAllModals, toast } from './ui/dom.js';
 import { bus, settings, progress, loadSave, hasSave, save, startMission, missionState, awardCard, activeMission, log, gameEvent } from './systems/core.js';
 import { generateTexture, TEXTURE_IDS, spherePreview } from './scene/textures.js';
+import { upgradeMoonTextures } from './scene/realMaps.js';
 import { BODIES } from './data/solarSystem.js';
 import { initModals, openJournal, openLogbook, openHelp, openSettings, openMap, openCompare, DESKTOP_KEYS } from './ui/modals.js';
 import { initHUD, renderTracker, renderInfo } from './ui/hud.js';
@@ -78,6 +79,9 @@ async function boot() {
     fill.style.width = `${p}%`; bar.setAttribute('aria-valuenow', p); txt.textContent = steps[Math.floor(i / TEXTURE_IDS.length * steps.length)];
     await new Promise(r => setTimeout(r, 0));
   }
+  // Swap in real maps of the moons (NASA / LRO / Cassini / Galileo-based). Any failure keeps the generated texture.
+  txt.textContent = 'Loading real moon maps…';
+  try { app.realMaps = await upgradeMoonTextures(app.textures, q); } catch (e) { console.warn(e); app.realMaps = []; }
   for (const b of BODIES) { try { app.previews[b.id] = spherePreview(app.textures[b.vis.tex], 144, { emissive: b.id === 'sun' }); } catch { app.previews[b.id] = null; } }
   initModals(app); initPanels(app); initLab(app); initSurface(app);
   // 3D
