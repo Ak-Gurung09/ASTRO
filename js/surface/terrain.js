@@ -286,8 +286,18 @@ export function grainTextures(seed = 1) {
 }
 
 // Make a material use the baked 'sunvis' attribute to block direct sunlight in far terrain shadows.
-export function applySunVis(mat) {
+export function applySunVis(mat, { detail = false } = {}) {
   mat.onBeforeCompile = sh => {
+    if (detail) { // sample the grain at three scales (3 m, 22 m, 97 m) so the ground never shows a repeating tile
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <map_fragment>', `#ifdef USE_MAP
+          vec4 sampledDiffuseColor = texture2D( map, vMapUv );
+          float s2 = texture2D( map, vMapUv * 0.137 + vec2(0.37, 0.71) ).g / 0.62, s3 = texture2D( map, vMapUv * 0.031 + vec2(0.11, 0.53) ).g / 0.62;
+          sampledDiffuseColor.rgb *= mix(1.0, s2, 0.55) * mix(1.0, s3, 0.5);
+          diffuseColor *= sampledDiffuseColor;
+        #endif`)
+        .replace('vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0;', 'vec3 mapN = texture2D( normalMap, vNormalMapUv ).xyz * 2.0 - 1.0; vec3 mapN2 = texture2D( normalMap, vNormalMapUv * 0.21 + 0.4 ).xyz * 2.0 - 1.0; mapN = normalize(vec3(mapN.xy + mapN2.xy * 0.9, mapN.z));');
+    }
     sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nattribute float sunvis;\nvarying float vSunVis;').replace('#include <color_vertex>', '#include <color_vertex>\nvSunVis = sunvis;');
     sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vSunVis;')
       .replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace('getDirectionalLightInfo( directionalLight, directLight );', 'getDirectionalLightInfo( directionalLight, directLight ); directLight.color *= smoothstep(0.0, 1.0, vSunVis);'));

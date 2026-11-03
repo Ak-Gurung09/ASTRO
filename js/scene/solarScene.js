@@ -1,7 +1,7 @@
 // ASTRO LAB — 3D solar system (Three.js), camera controls and time simulation
 import * as THREE from '../../vendor/three.module.js';
 import { BODIES, BODY_MAP } from '../data/solarSystem.js';
-import { ringTexture, glowTexture, dotTexture } from './textures.js';
+import { ringTexture, glowTexture, dotTexture, fbm } from './textures.js';
 import { bus, settings, gameEvent } from '../systems/core.js';
 
 const J2000 = Date.UTC(2000, 0, 1, 12);
@@ -158,9 +158,14 @@ export class SolarScene {
     const geo = new THREE.SphereGeometry(radius, seg, seg / 2);
     let mat;
     if (b.id === 'sun') {
-      mat = new THREE.MeshBasicMaterial({ map: this._texture('sun'), color: 0xffffff });
+      mat = this.sunMat = sunMaterial(this._texture('sun'));
     } else {
-      mat = new THREE.MeshStandardMaterial({ map: this._texture(b.vis.tex), roughness: 1, metalness: 0, color: this._texture(b.vis.tex) ? 0xffffff : 0x999999 });
+      const map = this._texture(b.vis.tex);
+      mat = new THREE.MeshStandardMaterial({ map, roughness: 1, metalness: 0, color: map ? 0xffffff : 0x999999 });
+      // surface relief: rocky and icy worlds use their own albedo as a height map (shows up along the terminator)
+      const relief = { mercury: 2.2, moon: 2.4, mars: 1.4, phobos: 2, ceres: 2, io: 1.2, europa: 1, ganymede: 1.6, callisto: 2.2, enceladus: 1, triton: 1.2, pluto: 1.2, charon: 1.6 }[b.vis.tex];
+      if (relief && map) { mat.bumpMap = map; mat.bumpScale = relief; }
+      if (b.id === 'earth') earthMaterial(mat, this.textures.earth);
     }
     const mesh = new THREE.Mesh(geo, mat);
     mesh.userData.id = b.id;
@@ -422,9 +427,10 @@ export class SolarScene {
       const spin = (2 * Math.PI) / (b.rotationHours / 24) * spd;
       e.mesh.rotation.y += Math.sign(spin) * Math.min(Math.abs(spin), MAX_SPIN) * dt;
       if (e.clouds) e.clouds.rotation.y += Math.sign(spin) * Math.min(Math.abs(spin), MAX_SPIN) * dt * 1.15 + dt * 0.01;
-      const hl = (id === this.selected) ? 1.4 : (id === this.hovered ? 0.9 : 0);
+      const hl = (id === this.selected) ? 0.9 : (id === this.hovered ? 0.6 : 0);
       const u = e.halo.material.uniforms.uI; u.value += (hl - u.value) * Math.min(1, dt * 8);
     }
+    if (this.sunMat && !settings.reducedMotion) this.sunMat.uniforms.uT.value += dt;
     const sun = this.bodies.get('sun');
     if (sun.glows && !settings.reducedMotion) { const t = performance.now() / 1000; sun.glows[0].scale.setScalar(sun.radius * (6.5 + Math.sin(t * 0.8) * 0.25)); }
   }
@@ -484,3 +490,68 @@ export class SolarScene {
 }
 
 function c_focus(el) { try { el.focus({ preventScroll: true }); } catch {} }
+
+// ---------------- Special materials ----------------
+// The Sun: granulation that boils slowly, brighter active regions and limb darkening (the edge of the disc is redder and dimmer).
+function sunMaterial(map) {
+  return new THREE.ShaderMaterial({
+    uniforms: { uMap: { value: map }, uT: { value: 0 } },
+    vertexShader: `varying vec3 vP; varying vec3 vN; varying vec3 vV; varying vec2 vUv;
+      void main(){ vP = position; vUv = uv; vN = normalize(normalMatrix * normal); vec4 mv = modelViewMatrix * vec4(position, 1.0); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }`,
+    fragmentShader: `uniform sampler2D uMap; uniform float uT; varying vec3 vP; varying vec3 vN; varying vec3 vV; varying vec2 vUv;
+      float hs(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+      float vn(vec3 x){ vec3 i = floor(x), f = fract(x); f = f * f * (3.0 - 2.0 * f);
+        return mix(mix(mix(hs(i), hs(i + vec3(1,0,0)), f.x), mix(hs(i + vec3(0,1,0)), hs(i + vec3(1,1,0)), f.x), f.y),
+                   mix(mix(hs(i + vec3(0,0,1)), hs(i + vec3(1,0,1)), f.x), mix(hs(i + vec3(0,1,1)), hs(i + vec3(1,1,1)), f.x), f.y), f.z); }
+      float fbm(vec3 p){ float a = 0.5, s = 0.0; for (int i = 0; i < 5; i++) { s += a * vn(p); p = p * 2.07 + vec3(3.1, 1.7, 2.3); a *= 0.5; } return s; }
+      void main(){
+        vec3 p = normalize(vP);
+        float gran = fbm(p * 26.0 + vec3(uT * 0.06, -uT * 0.04, uT * 0.05));
+        float cells = fbm(p * 7.0 - vec3(0.0, uT * 0.012, 0.0));
+        float act = smoothstep(0.58, 0.75, fbm(p * 2.2 + vec3(5.0, uT * 0.004, 1.0)));
+        vec3 base = texture2D(uMap, vUv).rgb;
+        float mu = clamp(dot(normalize(vN), normalize(vV)), 0.0, 1.0);
+        float limb = 0.3 + 0.7 * pow(mu, 0.55);
+        vec3 col = base * (0.7 + 0.6 * gran) * (0.85 + 0.3 * cells) * (1.0 + 0.35 * act);
+        col *= mix(vec3(1.0, 0.55, 0.25), vec3(1.0), smoothstep(0.0, 0.6, mu)) * limb;
+        gl_FragColor = vec4(col * 1.35, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`
+  });
+}
+// Earth: oceans are glossy (you see the Sun's glint on them) and city lights glow on the night side.
+function earthMaterial(mat, src) {
+  if (!src) return;
+  const w = src.width, h = src.height, d = src.getContext('2d').getImageData(0, 0, w, h).data;
+  const rough = document.createElement('canvas'), lights = document.createElement('canvas'); rough.width = lights.width = w; rough.height = lights.height = h;
+  const ri = rough.getContext('2d').createImageData(w, h), li = lights.getContext('2d').createImageData(w, h);
+  let sd = 9; const rnd = () => (sd = (sd * 16807) % 2147483647) / 2147483647;
+  for (let i = 0; i < w * h; i++) {
+    const r = d[i * 4], g = d[i * 4 + 1], b = d[i * 4 + 2];
+    const ocean = b > r + 25 && b > g, ice = r > 215 && g > 215;
+    const v = ocean ? 105 : 255; ri.data.set([v, v, v, 255], i * 4);
+    let L = 0;
+    if (!ocean && !ice) {
+      const lon = (i % w) / w * Math.PI * 2, lat = (0.5 - (i / w | 0) / h) * Math.PI, cl = Math.cos(lat);
+      const x = cl * Math.cos(lon), y = Math.sin(lat), z = cl * Math.sin(lon);
+      const pop = fbm(x * 5 + 3, y * 5, z * 5, 77, 4) * (Math.abs(lat) < 1.15 ? 1 : 0) * (r > 170 && g > 140 ? 0.4 : 1); // few people in deserts and polar regions
+      if (pop > 0.5) { const k = rnd(); L = k > 0.45 ? (60 + (pop - 0.5) * 1500) * (0.5 + rnd() * 0.5) : 0; }
+    }
+    L = Math.min(255, L);
+    li.data.set([L, L * 0.75, L * 0.4, 255], i * 4);
+  }
+  rough.getContext('2d').putImageData(ri, 0, 0); lights.getContext('2d').putImageData(li, 0, 0);
+  mat.roughnessMap = new THREE.CanvasTexture(rough); mat.roughness = 1;
+  mat.emissiveMap = new THREE.CanvasTexture(lights); mat.emissiveMap.colorSpace = THREE.SRGBColorSpace; mat.emissive = new THREE.Color(1, 0.85, 0.6); mat.emissiveIntensity = 1.2;
+  mat.onBeforeCompile = sh => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <emissivemap_fragment>', `#ifdef USE_EMISSIVEMAP
+      vec4 emissiveColor = texture2D( emissiveMap, vEmissiveMapUv );
+      float night = 1.0;
+      #if NUM_POINT_LIGHTS > 0
+        night = 1.0 - smoothstep(-0.12, 0.08, dot(normal, normalize(pointLights[0].position + vViewPosition)));
+      #endif
+      totalEmissiveRadiance *= emissiveColor.rgb * night;
+    #endif`);
+  };
+}

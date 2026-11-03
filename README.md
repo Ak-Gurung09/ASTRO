@@ -18,6 +18,15 @@ Progress saves automatically to `localStorage` on the device. You can wipe it wi
 
 ---
 
+## Graphics and animation (Phase 3)
+
+* **Astronaut**: a fully jointed suit (hips, spine, shoulders, elbows, knees, ankles) with a gold reflective visor, life-support pack, chest control box, hoses and quilted fabric. The animator blends idle breathing, a walk whose stride is tied to distance (no foot sliding), the low-gravity "lope" hop (cadence follows the world's gravity), crouch, jump, landing squash, sliding and the seated driving pose.
+* **Movement**: the astronaut turns smoothly and leans into turns instead of snapping, the camera drifts behind you while you walk or drive, and the field of view widens a little at speed.
+* **Footprints and tracks**: ribbed boot prints and rover wheel tracks stay on the ground and follow the slope; when the pool of marks is full the oldest ones are recycled. Boots and wheels kick up soft, fading dust.
+* **Models**: rounded, textured rover with wire-mesh tyres, fenders and independent suspension that follows the ground under each wheel; crinkled gold foil on the Lunar Module and lander; fractured, noise-displaced rocks with a grain texture; reflections from a small environment map built from each world's own sky.
+* **Ground**: the surface grain is sampled at three scales so the terrain no longer shows a repeating tile.
+* **Solar system**: the Sun boils (animated granulation with limb darkening), rocky and icy worlds have surface relief that shows along the terminator, Earth's oceans glint in the Sun and its cities glow on the night side.
+
 ## 2. Gameplay summary
 
 | Area | What you do | Rewards |

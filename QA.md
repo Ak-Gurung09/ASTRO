@@ -1,4 +1,4 @@
-# ASTRO LAB — QA checklist (Phases 1 and 2)
+# ASTRO LAB — QA checklist (Phases 1 to 3)
 
 I tested in headless Chromium (Playwright) at desktop 1366×820 and on an iPhone 13 profile (390×844, touch). The scripted runs used real mouse, keyboard and tap input wherever possible.
 
@@ -33,6 +33,18 @@ I tested in headless Chromium (Playwright) at desktop 1366×820 and on an iPhone
 | S9 | Shackleton ice hunt | ✅ Pass | Crest → descend into shadow (100+ m below the rim, Sun blocked by the terrain) → scan shows the hydrogen/ice signal → icy core (refused in sunlight) → back to the crest |
 | S10 | Phone layout | ✅ Pass | iPhone 13 profile: joystick, action buttons, collapsible objectives, no horizontal overflow. The joystick moved the astronaut |
 | S11 | Single-file build | ✅ Pass | `astro-lab-standalone.html` opened from `file://` lands on the Moon with no errors |
+
+## Phase 3: graphics and animation
+
+| # | Check | Result | How it was checked |
+|---|---|---|---|
+| G1 | All 11 landing sites build, walk, jump and lift off with the new astronaut and effects | ✅ Pass | Each site loaded, walked and loped for 4 s of simulated time, then jumped. No page or console errors, no NaN in any joint |
+| G2 | Walk, lope, jump, crouch and driving poses | ✅ Pass | Posed the rig directly and checked screenshots from the side and back. Feet stay on the ground, knees and elbows bend the right way |
+| G3 | Footprints and rover tracks | ✅ Pass | 8 s of walking left ribbed prints on the slope; 20 s of driving left 600+ track marks. Pools recycle the oldest marks |
+| G4 | Rover suspension and wheel spin | ✅ Pass | Wheel heights moved by about ±4 cm over bumps (limit ±15 cm); wheels spin in the driving direction |
+| G5 | Smooth turning and camera follow | ✅ Pass | Turning right while walking turned the astronaut gradually (about 7 rad/s maximum); the camera swung behind within a few seconds |
+| G6 | Solar system look | ✅ Pass | Screenshots of the Sun, Earth (day and night side), Moon, Mars and Jupiter |
+| G7 | Phone layout and single-file build | ✅ Pass | iPhone 13 profile, no horizontal overflow, joystick moves the astronaut. The bundled `index.html` opens from `file://` and lands on the Moon |
 
 ## Known limits
 * The headless test browser renders WebGL in software (about 7 fps for the 3D view), so I could not measure real-GPU frame rate here. The 2D simulations ran at about 60 fps. Auto quality lowers the resolution if the frame rate drops below 40 fps.

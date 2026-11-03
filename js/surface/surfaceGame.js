@@ -4,12 +4,12 @@
 import * as THREE from '../../vendor/three.module.js';
 import { SURFACE_BODIES, SITE_MAP, COLORS } from '../data/surfaces.js';
 import { Terrain, makePainter, grainTextures, rng, applySunVis, fbm2 } from './terrain.js';
-import { makeAstronaut, poseAstronaut, makeRover, makeModel, makeLM, makeLander, rockGeometry } from './models.js';
-import { glowTexture, ringTexture } from '../scene/textures.js';
+import { makeAstronaut, AstroAnimator, makeRover, makeModel, makeLM, makeLander, rockGeometry, rockTex, bootprintTex, trackTex } from './models.js';
+import { glowTexture, ringTexture, dotTexture } from '../scene/textures.js';
 import { bus, settings, progress, save, addXP, log, gameEvent } from '../systems/core.js';
 import { $, h, toast, openModal, modalOpen } from '../ui/dom.js';
 
-const DEG = Math.PI / 180, G_EARTH = 9.81;
+const DEG = Math.PI / 180, G_EARTH = 9.81, UP = new THREE.Vector3(0, 1, 0);
 const dirFrom = (az, el) => new THREE.Vector3(Math.sin(az * DEG) * Math.cos(el * DEG), Math.sin(el * DEG), -Math.cos(az * DEG) * Math.cos(el * DEG));
 const fmt = (v, d = 1) => (Math.abs(v) < 10 ? v.toFixed(d) : Math.round(v).toString());
 const fmtTime = s => s < 90 ? `${s.toFixed(1)} s` : s < 5400 ? `${(s / 60).toFixed(1)} min` : `${(s / 3600).toFixed(1)} h`;
@@ -55,7 +55,7 @@ export class SurfaceGame {
     const geo = t.buildMesh(this.sunDir, makePainter(s));
     await tick();
     const grain = grainTextures(s.seed);
-    const mat = applySunVis(new THREE.MeshStandardMaterial({ vertexColors: true, map: grain.map, normalMap: grain.normal, normalScale: new THREE.Vector2(0.5, 0.5), roughness: 1, metalness: 0 }));
+    const mat = applySunVis(new THREE.MeshStandardMaterial({ vertexColors: true, map: grain.map, normalMap: grain.normal, normalScale: new THREE.Vector2(0.55, 0.55), roughness: 1, metalness: 0 }), { detail: true });
     const ground = this.ground = new THREE.Mesh(geo, mat); ground.receiveShadow = true; scene.add(ground);
 
     // Sky & lights
@@ -92,16 +92,18 @@ export class SurfaceGame {
     for (const sp of s.samples) {
       if (this.rec.samples.includes(sp.id)) continue;
       const grp = new THREE.Group(); grp.position.set(sp.x, t.h(sp.x, sp.z), sp.z);
-      const rock = new THREE.Mesh(sGeo, new THREE.MeshStandardMaterial({ color: new THREE.Color(...(COLORS[s.rocks?.color] || [0.6, 0.6, 0.6])).multiplyScalar(1.15), roughness: 0.9 }));
+      const rock = new THREE.Mesh(sGeo, new THREE.MeshStandardMaterial({ color: new THREE.Color(...(COLORS[s.rocks?.color] || [0.6, 0.6, 0.6])).multiplyScalar(1.15), roughness: 0.85, bumpMap: rockTex(), bumpScale: 2 }));
       rock.scale.setScalar(0.16); rock.position.y = 0.08; rock.castShadow = true; grp.add(rock);
       const ring = new THREE.Mesh(ringGeo, ringMat); ring.rotation.x = Math.PI / 2; ring.position.y = 0.04; grp.add(ring);
       grp.userData = { sp, ring }; scene.add(grp); this.sampleObjs.push(grp);
     }
     if (s.lava) this.buildLava();
     this.buildParticles();
+    this.buildDecals();
 
     // Player
     const a = this.astro = makeAstronaut(); scene.add(a);
+    this.anim = new AstroAnimator(a); this.anim.onStep = k => this.footstep(k);
     const sp = s.spawn;
     this.p = { pos: new THREE.Vector3(sp.x, t.h(sp.x, sp.z), sp.z), vel: new THREE.Vector3(), ground: true, yaw: -sp.yaw * DEG, phase: 0, airT: 0, jumpBase: 0, peak: 0, fuel: 40, inSun: true, sunT: 0 };
     this.camYaw = -sp.yaw * DEG; this.camPitch = 0.28; this.camDist = 7; this.fp = false;
@@ -111,6 +113,7 @@ export class SurfaceGame {
       this.rv = { pos: new THREE.Vector3(s.rover.x, t.h(s.rover.x, s.rover.z), s.rover.z), vy: 0, u: 0, yaw: -s.rover.yaw * DEG, steer: 0, ground: true, air: 0, q: new THREE.Quaternion(), max: s.rover.max || 3.6 };
       this.updateRoverPose(0);
     }
+    this.buildEnv();
     this.driving = false;
     this.drop = null; this.facts = new Set();
     this.objDone = new Set(this.rec.obj);
@@ -181,7 +184,7 @@ export class SurfaceGame {
     const L = s.lander || { x: 0, z: 0 };
     const keep = list.filter(([x, z, sz]) => Math.hypot(x - L.x, z - L.z) > 7 + sz && t.inBounds(x, z, 10));
     const col = new THREE.Color(...(COLORS[cfg.color] || [0.6, 0.6, 0.6])).convertSRGBToLinear();
-    const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.95 });
+    const rt = rockTex(); const mat = new THREE.MeshStandardMaterial({ color: col, roughness: 0.92, bumpMap: rt, bumpScale: 2.5 });
     const geos = [rockGeometry(1, cfg.round), rockGeometry(2, cfg.round), rockGeometry(3, cfg.round)];
     this.boulders = [];
     geos.forEach((geo, gi) => {
@@ -221,11 +224,12 @@ export class SurfaceGame {
 
   buildParticles() {
     // Dust kicked up by boots and wheels
-    const n = 1400; this.dust = { n, i: 0, pos: new Float32Array(n * 3), vel: new Float32Array(n * 3), life: new Float32Array(n) };
-    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(this.dust.pos, 3)); g.setDrawRange(0, n);
+    const n = 1800; this.dust = { n, i: 0, pos: new Float32Array(n * 3), vel: new Float32Array(n * 3), life: new Float32Array(n), col: new Float32Array(n * 4) };
+    const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.BufferAttribute(this.dust.pos, 3)); g.setAttribute('color', new THREE.BufferAttribute(this.dust.col, 4)); g.setDrawRange(0, n);
     for (let i = 0; i < n; i++) this.dust.pos[i * 3 + 1] = -1e5;
-    const c = COLORS[this.site.paint.base]; const col = new THREE.Color(...c).multiplyScalar(1.25);
-    this.dustPts = new THREE.Points(g, new THREE.PointsMaterial({ color: col, size: 0.05, sizeAttenuation: true, transparent: true, opacity: 0.9, depthWrite: false }));
+    const c = COLORS[this.site.paint.base]; this.dustCol = new THREE.Color(...c).multiplyScalar(0.8);
+    const dt = new THREE.CanvasTexture(dotTexture());
+    this.dustPts = new THREE.Points(g, new THREE.PointsMaterial({ size: 0.075, map: dt, vertexColors: true, sizeAttenuation: true, transparent: true, depthWrite: false }));
     this.dustPts.frustumCulled = false; this.scene.add(this.dustPts);
     // Geyser / plume jets
     if (this.site.vents) {
@@ -255,6 +259,7 @@ export class SurfaceGame {
     const warp = WARPS[this.warpI]; const simDt = dt * warp;
     const steps = Math.min(64, Math.ceil(simDt / (1 / 120))); const h = simDt / steps;
     for (let i = 0; i < steps; i++) this.step(h);
+    this.simDt = simDt;
     this.stepEffects(simDt);
     if (this.body.dose) this.state.dose += this.body.dose * simDt;
     this.p.sunT -= dt; if (this.p.sunT <= 0) { this.p.sunT = 0.35; const q = this.driving ? this.rv.pos : this.p.pos; this.p.inSun = this.terrain.sunVis(q.x, q.z, q.y + 1.2, this.sunDir, 3000) > 0.3; }
@@ -335,13 +340,16 @@ export class SurfaceGame {
       if (P.pos.y > nh + 0.04) { P.ground = false; P.jumpBase = P.pos.y; P.peak = P.pos.y; P.airT = 0; P.jumpV = 0; } else P.pos.y = nh;
     } else if (P.pos.y <= nh) {
       const impact = -v.y; P.pos.y = nh; P.ground = true;
-      if (P.airT > 0.15) this.landed(P.peak - P.jumpBase, P.airT, impact);
+      if (P.airT > 0.15) { this.landed(P.peak - P.jumpBase, P.airT, impact); this.anim.impact(impact); this.landPrints = true; }
       this.kickDust(P.pos, Math.min(40, 6 + impact * 10), 0.3 + impact * 0.25);
     }
     const sp = Math.hypot(v.x, v.z);
-    if (P.ground) { this.state.walked += sp * dt; P.phase += sp * dt * (g < 3 ? 3.2 : 4.6); if (sp > 0.3 && Math.floor(P.phase / Math.PI) !== Math.floor((P.phase - sp * dt * 3.2) / Math.PI)) this.kickDust(P.pos, 4, 0.25 + sp * 0.2); }
-    if (sp > 0.05 && P.ground) P.yaw = Math.atan2(-v.x, -v.z);
-    else if (mag > 0 && !P.ground) P.yaw = Math.atan2(-dx, -dz);
+    if (P.ground) this.state.walked += sp * dt;
+    // turn smoothly toward the direction of travel (a suited astronaut can't spin on the spot)
+    let tgt = null;
+    if (sp > 0.05 && P.ground) tgt = Math.atan2(-v.x, -v.z);
+    else if (mag > 0 && !P.ground) tgt = Math.atan2(-dx, -dz);
+    if (tgt !== null) { const d = Math.atan2(Math.sin(tgt - P.yaw), Math.cos(tgt - P.yaw)), mx = (P.ground ? 7 : 2.5) * dt; const st = Math.max(-mx, Math.min(mx, d * Math.min(1, dt * 12))); P.yaw += st; P.turn = st / dt; } else P.turn = 0;
     // escape velocity!
     if (v.length() > b.escape && v.y > 0) this.escaped();
   }
@@ -389,6 +397,7 @@ export class SurfaceGame {
     const nh = t.h(R.pos.x, R.pos.z) + (fbm2(R.pos.x / 2.6, R.pos.z / 2.6, 77, 2) - 0.5) * 0.24;
     if (R.ground) { if (R.pos.y > nh + 0.003) { R.ground = false; R.air = 0; } else R.pos.y = nh; }
     else if (R.pos.y <= nh) { R.pos.y = nh; R.ground = true; if (R.air > 0.25) { this.state.airMax = Math.max(this.state.airMax, R.air); this.kickDust(R.pos, 30, 1.2); if (control) this.jumpInfo = `Rover airborne for ${R.air.toFixed(2)} s — in 1/6 g the rover leaves the ground over every bump.`; } }
+    if (R.ground && Math.abs(R.u) > 0.08) { R.trk = (R.trk || 0) + Math.abs(R.u) * dt; if (R.trk > 0.38) { R.trk = 0; this.stampTracks(); } }
     if (control) { this.state.driven += Math.abs(R.u) * dt; if (R.ground && Math.abs(R.u) > 1 && Math.random() < dt * 20) { const w = this.roverObj.userData.wheels[Math.random() * 4 | 0]; const p = w.getWorldPosition(new THREE.Vector3()); this.kickDust(p, 3, 0.4 + Math.abs(R.u) * 0.35, fwd.x * R.u * 0.5, fwd.y * R.u * 0.5); } }
     this.updateRoverPose(dt);
   }
@@ -403,7 +412,14 @@ export class SurfaceGame {
       const q = new THREE.Quaternion().setFromEuler(e); R.q.slerp(q, dt ? Math.min(1, dt * 12) : 1);
     }
     o.quaternion.copy(R.q);
-    for (const w of o.userData.wheels) w.children[0].rotation.x += R.u * (dt || 0) / 0.41;
+    // independent suspension: each wheel follows the ground under it (±15 cm of travel)
+    o.updateMatrixWorld(true); const wp = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0).applyQuaternion(o.quaternion);
+    for (const w of o.userData.wheels) {
+      wp.set(w.position.x, w.userData.baseY, w.position.z).applyMatrix4(o.matrixWorld);
+      const want = R.ground ? (t.h(wp.x, wp.z) + 0.41 - wp.y) / Math.max(0.5, up.y) : -0.14;
+      const off = Math.max(-0.15, Math.min(0.15, want)); w.position.y += (w.userData.baseY + off - w.position.y) * (dt ? Math.min(1, dt * 18) : 1);
+      w.children[0].rotation.x -= R.u * (dt || 0) / 0.41;
+    }
     o.userData.wheels[0].rotation.y = o.userData.wheels[1].rotation.y = R.steer; o.userData.wheels[2].rotation.y = o.userData.wheels[3].rotation.y = -R.steer;
   }
   toggleRover() {
@@ -419,6 +435,61 @@ export class SurfaceGame {
     }
   }
 
+  // ---------------- Reflections, footprints & tracks ----------------
+  buildEnv() {
+    // A tiny HDR copy of this sky (black or hazy, the ground below, the Sun) gives visors, foil and metal real reflections.
+    const pm = new THREE.PMREMGenerator(this.renderer), sc = new THREE.Scene(), titan = this.body.sky === 'titan';
+    const ground = new THREE.Color(...COLORS[this.site.paint.base]).convertSRGBToLinear().multiplyScalar((titan ? 0.6 : 2.2) * Math.max(0.15, Math.sin(Math.max(3, this.site.sun.el) * DEG)));
+    const sky = titan ? new THREE.Color(0.45, 0.25, 0.09) : new THREE.Color(0.004, 0.005, 0.008);
+    const g = new THREE.SphereGeometry(50, 48, 24), pp = g.attributes.position, col = new Float32Array(pp.count * 3), c = new THREE.Color();
+    for (let i = 0; i < pp.count; i++) { const y = pp.getY(i) / 50; if (y < 0) c.copy(ground).multiplyScalar(0.55 + 0.45 * Math.min(1, -y * 4)); else c.copy(sky).lerp(titan ? new THREE.Color(0.25, 0.12, 0.04) : sky, y); col.set([c.r, c.g, c.b], i * 3); }
+    g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    sc.add(new THREE.Mesh(g, new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide })));
+    const sunI = titan ? 3 : 60 * Math.pow(this.body.sunAU, -1.2);
+    const sun = new THREE.Mesh(new THREE.SphereGeometry(titan ? 6 : 1.6, 16, 8), new THREE.MeshBasicMaterial({ color: new THREE.Color(sunI, sunI * 0.97, sunI * 0.9) }));
+    sun.position.copy(this.sunDir).multiplyScalar(40); sc.add(sun);
+    this.env = pm.fromScene(sc, 0.015).texture; pm.dispose(); g.dispose();
+    this.scene.traverse(o => { if (!o.isMesh) return; for (const m of [].concat(o.material)) if (m.userData?.env && !m.envMap) { m.envMap = this.env; m.envMapIntensity = m.userData.env; m.needsUpdate = true; } });
+  }
+  buildDecals() {
+    const c = COLORS[this.site.paint.base], lum = 0.3 * c[0] + 0.6 * c[1] + 0.1 * c[2];
+    const mk = (tex, n, w, l, op) => {
+      const geo = new THREE.PlaneGeometry(w, l); geo.rotateX(-Math.PI / 2);
+      const im = new THREE.InstancedMesh(geo, new THREE.MeshBasicMaterial({ color: 0x000000, map: tex, transparent: true, opacity: op, depthWrite: false }), n);
+      im.count = 0; im.frustumCulled = false; im.renderOrder = 1; this.scene.add(im);
+      return { im, n, i: 0, used: 0 };
+    };
+    const op = lum > 0.55 ? 0.35 : 0.62;
+    this.prints = mk(bootprintTex(), this.low ? 300 : 800, 0.17, 0.34, op);
+    if (this.site.rover) this.tracks = mk(trackTex(), this.low ? 900 : 2600, 0.24, 0.42, op * 0.9);
+    this._dm = new THREE.Matrix4(); this._dq = new THREE.Quaternion(); this._dq2 = new THREE.Quaternion(); this._dv = new THREE.Vector3(); this._d1 = new THREE.Vector3(1, 1, 1);
+  }
+  stamp(D, x, z, yaw) {
+    if (!D || (this.lavaEdge !== undefined && x < this.lavaEdge + 4)) return;
+    const t = this.terrain, n = t.normal(x, z);
+    this._dq.setFromUnitVectors(UP, n).multiply(this._dq2.setFromAxisAngle(UP, yaw));
+    this._dm.compose(this._dv.set(x, t.h(x, z) + 0.018, z), this._dq, this._d1);
+    D.im.setMatrixAt(D.i, this._dm); D.i = (D.i + 1) % D.n; D.used = Math.min(D.n, D.used + 1); D.im.count = D.used;
+    D.im.instanceMatrix.needsUpdate = true;
+  }
+  footstep(k) {
+    if (!this.p.ground || this.driving) return;
+    const a = this.astro, u = a.userData; a.updateMatrixWorld(true);
+    const v = new THREE.Vector3();
+    for (const leg of k === 2 ? [u.legL, u.legR] : [k ? u.legR : u.legL]) {
+      leg.an.localToWorld(v.set(0, -0.09, -0.045));
+      this.stamp(this.prints, v.x, v.z, this.p.yaw);
+      this.kickDust(v, 3 + Math.round(Math.hypot(this.p.vel.x, this.p.vel.z) * 2), 0.18 + Math.hypot(this.p.vel.x, this.p.vel.z) * 0.18, this.p.vel.x * 0.3, this.p.vel.z * 0.3);
+    }
+  }
+  stampTracks() {
+    const R = this.rv, f = [-Math.sin(R.yaw), -Math.cos(R.yaw)], r = [Math.cos(R.yaw), -Math.sin(R.yaw)];
+    for (const [x, z, s] of [[-1.03, -1.15, 1], [1.03, -1.15, 1], [-1.03, 1.15, -1], [1.03, 1.15, -1]]) {
+      const wx = R.pos.x + r[0] * x - f[0] * z, wz = R.pos.z + r[1] * x - f[1] * z;
+      this.stamp(this.tracks, wx, wz, R.yaw + R.steer * s);
+    }
+  }
+
   // ---------------- Effects ----------------
   kickDust(p, n, speed, vx = 0, vz = 0) {
     const D = this.dust;
@@ -426,6 +497,7 @@ export class SurfaceGame {
       const i = D.i = (D.i + 1) % D.n, a = Math.random() * Math.PI * 2, s = speed * (0.4 + Math.random() * 0.8), up = 0.5 + Math.random() * 0.9;
       D.pos[i * 3] = p.x + Math.cos(a) * 0.25; D.pos[i * 3 + 1] = p.y + 0.05; D.pos[i * 3 + 2] = p.z + Math.sin(a) * 0.25;
       D.vel[i * 3] = Math.cos(a) * s + vx; D.vel[i * 3 + 1] = s * up; D.vel[i * 3 + 2] = Math.sin(a) * s + vz; D.life[i] = 1;
+      const sh = 0.8 + Math.random() * 0.35, C = this.dustCol; D.col.set([C.r * sh, C.g * sh, C.b * sh, 0.9], i * 4);
     }
   }
   stepEffects(dt) {
@@ -437,9 +509,10 @@ export class SurfaceGame {
       const j = i * 3; D.vel[j + 1] -= g * dt;
       if (k) { const f = Math.exp(-k * dt); D.vel[j] = D.vel[j] * f + wind * (1 - f); D.vel[j + 1] *= f; D.vel[j + 2] *= f; }
       D.pos[j] += D.vel[j] * dt; D.pos[j + 1] += D.vel[j + 1] * dt; D.pos[j + 2] += D.vel[j + 2] * dt;
-      if (D.pos[j + 1] < t.h(D.pos[j], D.pos[j + 2])) { D.life[i] = 0; D.pos[j + 1] = -1e5; }
+      D.life[i] -= dt / (k ? 5 : 8); D.col[i * 4 + 3] = Math.min(0.9, D.life[i] * 3);
+      if (D.life[i] <= 0 || D.pos[j + 1] < t.h(D.pos[j], D.pos[j + 2])) { D.life[i] = 0; D.pos[j + 1] = -1e5; }
     }
-    this.dustPts.geometry.attributes.position.needsUpdate = true;
+    this.dustPts.geometry.attributes.position.needsUpdate = true; this.dustPts.geometry.attributes.color.needsUpdate = true;
     if (this.jets) {
       const J = this.jets, vents = this.site.vents, dark = vents[0].dark;
       const rate = dark ? 50 : 140;
@@ -507,8 +580,21 @@ export class SurfaceGame {
     const focus = this.driving ? this.rv.pos.clone().add(new THREE.Vector3(0, 1.6, 0)) : this.p.pos.clone().add(new THREE.Vector3(0, 1.45, 0));
     // astronaut pose
     const P = this.p, a = this.astro;
-    if (this.driving) { a.visible = true; a.position.copy(this.roverObj.position); a.quaternion.copy(this.roverObj.quaternion); a.translateY(0.55); a.translateX(-0.4); a.translateZ(0.1); poseAstronaut(a, { seated: true }); }
-    else { a.position.copy(P.pos); a.rotation.set(0, P.yaw, 0); const sp = Math.hypot(P.vel.x, P.vel.z); poseAstronaut(a, { phase: P.phase, amt: Math.min(1, sp / 1.2), lope: sp > 1.1 && this.g < 3, air: !P.ground, crouch: this.jumpHeld && P.ground ? Math.min(1, (performance.now() - this.jumpT) / 500) : 0 }); a.visible = !this.fp; }
+    const adt = Math.min(0.25, this.simDt ?? dt), sp = Math.hypot(P.vel.x, P.vel.z);
+    if (this.driving) { a.visible = true; a.position.copy(this.roverObj.position); a.quaternion.copy(this.roverObj.quaternion); a.translateY(0.55); a.translateX(-0.4); a.translateZ(0.1); this.anim.update(adt, { seated: true, speed: 0, ground: true, g: this.g }); }
+    else {
+      a.position.copy(P.pos); a.rotation.set(0, P.yaw, 0);
+      this.anim.update(adt, { speed: sp, ground: P.ground, g: this.g, vy: P.vel.y, turnRate: P.turn || 0, sliding: this.sliding && P.ground, crouch: this.jumpHeld && P.ground ? Math.min(1, (performance.now() - this.jumpT) / 500) : 0 });
+      if (this.landPrints) { this.landPrints = false; this.footstep(2); }
+      a.visible = !this.fp;
+    }
+    // camera drifts back behind you when you move (unless you've just dragged it)
+    if (this.intro <= 0 && !this.fp && performance.now() - (this.dragT || 0) > 1800) {
+      const inp = this.input(); let want = null, rate = 0;
+      if (this.driving && Math.abs(this.rv.u) > 0.3) { want = this.rv.yaw; rate = 1.6; }
+      else if (!this.driving && P.ground && sp > 0.4 && inp.y > 0.3 && Math.abs(inp.x) < 0.4) { want = P.yaw; rate = 0.6; }
+      if (want !== null) { const d = Math.atan2(Math.sin(want - this.camYaw), Math.cos(want - this.camYaw)); this.camYaw += d * Math.min(1, dt * rate); }
+    }
     if (this.intro > 0) {
       this.intro -= this.rdt || dt; const k = Math.max(0, this.intro / 3.2), e = k * k;
       const off = new THREE.Vector3(Math.sin(this.camYaw) * Math.cos(this.camPitch), Math.sin(this.camPitch), Math.cos(this.camYaw) * Math.cos(this.camPitch)).multiplyScalar(this.camDist);
@@ -522,6 +608,8 @@ export class SurfaceGame {
       const want = focus.clone().add(off);
       const gh = t.h(want.x, want.z) + 0.5; if (want.y < gh) want.y = gh;
       cam.position.lerp(want, 1 - Math.exp(-dt * 14)); cam.lookAt(focus);
+      const fov = 60 + (!this.driving && sp > 1.6 ? Math.min(6, (sp - 1.6) * 5) : 0) + (this.driving ? Math.min(5, Math.abs(this.rv.u) * 1.4) : 0);
+      if (Math.abs(cam.fov - fov) > 0.05) { cam.fov += (fov - cam.fov) * Math.min(1, dt * 3); cam.updateProjectionMatrix(); }
     }
     // keep the shadow camera on the player
     const fpos = this.driving ? this.rv.pos : P.pos;
@@ -770,7 +858,7 @@ export class SurfaceGame {
     cv.addEventListener('pointermove', e => {
       const p = ptrs.get(e.pointerId); if (!p) return;
       if (ptrs.size === 2) { const o = [...ptrs.entries()].find(([k]) => k !== e.pointerId)[1]; const d = Math.hypot(e.clientX - o.x, e.clientY - o.y); if (pinch) this.camDist = Math.max(2.5, Math.min(60, this.camDist * pinch / d)); pinch = d; }
-      else { const sx = this.fp ? 0.004 : 0.006; this.camYaw -= (e.clientX - p.x) * sx; this.camPitch = Math.max(this.fp ? -1.2 : -0.15, Math.min(1.35, this.camPitch + (e.clientY - p.y) * sx * (this.fp ? -1 : 1))); }
+      else { this.dragT = performance.now(); const sx = this.fp ? 0.004 : 0.006; this.camYaw -= (e.clientX - p.x) * sx; this.camPitch = Math.max(this.fp ? -1.2 : -0.15, Math.min(1.35, this.camPitch + (e.clientY - p.y) * sx * (this.fp ? -1 : 1))); }
       p.x = e.clientX; p.y = e.clientY;
     });
     const up = e => { ptrs.delete(e.pointerId); pinch = 0; }; cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
@@ -784,6 +872,7 @@ export class SurfaceGame {
     removeEventListener('keydown', this._kd); removeEventListener('keyup', this._ku); removeEventListener('blur', this._blur); removeEventListener('resize', this._onResize);
     clearTimeout(this._sayT);
     this.scene?.traverse(o => { o.geometry?.dispose?.(); const m = o.material; if (m) [].concat(m).forEach(x => { x.map?.dispose?.(); x.normalMap?.dispose?.(); x.dispose?.(); }); });
+    this.env?.dispose();
     this.renderer?.dispose(); this.renderer?.forceContextLoss?.(); this.renderer?.domElement.remove();
   }
 }
