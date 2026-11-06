@@ -48,7 +48,7 @@ export class SolarScene {
   }
   applyQuality(q = settings.quality) {
     const dpr = window.devicePixelRatio || 1;
-    const pr = q === 'low' ? 1 : q === 'medium' ? Math.min(dpr, 1.5) : Math.min(dpr, 2);
+    const pr = q === 'low' ? 1 : q === 'medium' ? Math.min(dpr, 1.5) : q === 'ultra' ? Math.min(dpr, 2.5) : Math.min(dpr, 2);
     this.renderer.setPixelRatio(q === 'auto' ? Math.min(dpr, 1.75) : pr);
     if (this.starsLayer2) this.starsLayer2.visible = q !== 'low';
   }

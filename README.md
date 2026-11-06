@@ -28,6 +28,50 @@ Progress saves automatically to `localStorage` on the device. You can wipe it wi
 * **Solar system**: the Sun boils (animated granulation with limb darkening), rocky and icy worlds have surface relief that shows along the terminator, Earth's oceans glint in the Sun and its cities glow on the night side.
 * **Real moon maps (Phase 4)**: all ten moons use real global maps instead of generated ones: the Moon (LRO camera data), Phobos, Io, Europa, Ganymede, Callisto, Titan, Enceladus, Triton and Charon. The maps are embedded in the game (about 1 MB), so it still works offline and from a double-clicked `index.html`. If a map fails to decode, that moon keeps its generated texture. Sources, authors and licences are in `textures/moons/CREDITS.md` and in **Help → Image credits**. Two of the maps (Moon and Callisto) are CC BY-SA.
 
+## Career Mode (astronaut training story)
+
+The main menu leads with **New Game**: a first-person story where you train as an astronaut candidate, from your bedroom to your first orbit. Everything from earlier phases is still here under **Free Explore** (Solar System Missions, Surface Expeditions, Simulation Lab, Celestial Explorer).
+
+**Story outline**
+1. **Home.** Wake up, choose your name (1–9 letters or numbers), go downstairs to Bug and Cat, open the NASA acceptance letter, ride to the training centre.
+2. **Training centre.** Security, check-in, create your astronaut ID, safety rules and the trainee agreement. The hub then unlocks each module in order.
+3. **Physical training (8 exercises).** Spacesuit Preparation, Equipment Inspection, Mobility Course, Reduced-Gravity Handrails, Neutral Buoyancy Pool, Emergency Response, Equipment Management, Survival & Teamwork.
+4. **Space Greenhouse (Mission GREENHOUSE-01).** Buy parts on a budget, build it in 11 steps, process lunar regolith, plant two crops, run the live control panel, fix faults, recycle water, harvest and report.
+5. **Health & Neuroscience.** Baseline checks, a rotatable 3D brain, a lunar medical scenario and a knowledge check. Every fact is labelled "confirmed" or "still being researched". For learning only, not medical advice.
+6. **Spacecraft Systems, Robotic Arm, EVA.** Power up a cockpit and handle fault drills; drive a six-joint arm to capture and berth cargo; go outside on a tether to replace an antenna.
+7. **Launch Day (simplified).** Final checks, suit-up, ride to the pad, strap in, countdown and GO/NO-GO poll, liftoff, ascent callouts, an orbit burn, then orbit operations (system alerts and a roll-stability manoeuvre). You graduate as a Junior Astronaut and the story hands you over to the solar-system game.
+
+Every exercise ends with a score, your mistakes, the science behind it, XP and badges. **Training Modules** replays any unlocked exercise as practice without touching the story. Difficulty (Easy, Normal, Hard, Realistic) changes budgets, time limits, quiz options, tolerances and how many faults happen at once.
+
+Career code lives in `js/career/` (engine, state, data, models, scenes, ui). Career progress is saved inside the same save as everything else (`progress.career`), so XP and badges are shared. To rebuild `index.html` after editing: `python3 tools/build/build.py .` (needs esbuild).
+
+### Career controls
+| Keyboard & mouse | Touch | Gamepad | Action |
+|---|---|---|---|
+| W A S D / arrows | Joystick | Left stick | Walk |
+| Mouse (click the view first) | Drag the view | Right stick | Look |
+| Shift (hold) | » Jog | R3 | Jog |
+| C / Ctrl (hold) | ⤵ Crouch | L3 | Crouch |
+| E / Enter | ✋ Use, or tap the object | A | Use, pick up, place, talk |
+| R / Q | ⟳ Rotate | X | Rotate held item |
+| G | ⤓ Drop | Y | Put item down |
+| L | ✉ button | — | Re-read your acceptance letter |
+| 1–4, Space | Tap a choice | D-pad, A | Dialogue |
+| H | ❔ | Back | Controls guide |
+| Esc | ❚❚ | Start | Pause |
+
+**Special training controls**
+| Where | Controls |
+|---|---|
+| Floating (low-g, pool, EVA) | Look at a handrail and press E to grab it. Hold W (or push the joystick forward) to push off where you look; Shift pushes harder. With nothing in view, E reels in your tether |
+| Pool | ⚖ button: trim your weight pockets |
+| Robotic arm | 1–6 pick a joint, W/S or ↑/↓ move it, P precision, V camera, C capture/release, Space E-STOP. Touch: the arm panel |
+| Cockpit and launch | Point at a switch or button and press E (or tap it) |
+| Orbit burn | Hold the 🔥 button at the top of the orbit |
+| Orbit roll | Hold Q / E (or ← / →, or the on-screen buttons) to fire thrusters against the roll |
+
+---
+
 ## 2. Gameplay summary
 
 | Area | What you do | Rewards |

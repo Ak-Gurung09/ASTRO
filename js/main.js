@@ -10,14 +10,22 @@ import { initPanels, renderArchive, renderExplorer } from './ui/archive.js';
 import { initLab, renderLab, stopSim } from './ui/lab.js';
 import { initSurface, openSitePicker, surfaceEsc } from './ui/surface.js';
 import { STORY_ORDER } from './data/missions.js';
+import { initCareer, startCareerScene, careerEsc, careerDebug } from './career/career.js';
+import { initCareerMenus, openNewGame, resumeGame, openTrainingModules, openAchievements, openCredits, quitGame, openFreeExplore } from './career/ui/menus.js';
+import { careerStarted } from './career/state/careerSave.js';
+import { playMusic } from './career/engine/audio.js';
+import { startMenuParticles } from './career/ui/menuFx.js';
 
 const app = {
   scene: null, textures: {}, previews: {}, mode: 'loading', returnTo: 'menu',
   inGame: () => app.mode === 'game' && !!app.scene,
   open, toMenu, toGame, skipTutorial, applyJoystick, show: id => show(id),
-  openSurface: bodyId => (app.scene ? openSitePicker(bodyId) : no3D())
+  openSurface: bodyId => (app.scene ? openSitePicker(bodyId) : no3D()),
+  menuAction: a => menuAction(a),
+  hasExploreSave: () => !!(progress.tutorialSeen || Object.keys(progress.missions || {}).length)
 };
 window.__astrolab = app; // handy for debugging in the console
+app.careerRun = () => careerDebug();
 
 // ---------------- Error handling ----------------
 let errShown = 0;
@@ -41,9 +49,10 @@ function show(id) {
 }
 function toMenu() {
   closeAllModals(); show('menu');
-  const c = $('#btn-continue'); const has = hasSave();
-  c.disabled = !has || !app.scene; $('#menu-note').textContent = !app.scene ? '3D view unavailable on this device — Archive, Explorer and Simulations still work.' : has ? '' : 'No saved progress yet — press Start Mission to begin.';
+  $('#btn-resume').hidden = !careerStarted();
+  $('#menu-note').textContent = !app.scene ? '3D view unavailable on this device. Archive, Explorer and Simulations still work.' : careerStarted() ? '' : 'New here? Press New Game to start your astronaut story.';
   app.scene?.deselect(); app.scene?.overview();
+  if (musicPrimed) playMusic('menu');
 }
 function toGame() {
   if (!app.scene) return no3D();
@@ -64,6 +73,7 @@ function open(what) {
 // ---------------- Boot ----------------
 async function boot() {
   document.documentElement.style.setProperty('--ts', settings.textScale);
+  if (!['auto', 'low', 'medium', 'high', 'ultra'].includes(settings.quality)) settings.quality = 'auto';
   document.body.classList.toggle('reduced-motion', !!settings.reducedMotion);
   if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) document.body.classList.add('touch');
   applyJoystick();
@@ -83,7 +93,11 @@ async function boot() {
   txt.textContent = 'Loading real moon maps…';
   try { app.realMaps = await upgradeMoonTextures(app.textures, q); } catch (e) { console.warn(e); app.realMaps = []; }
   for (const b of BODIES) { try { app.previews[b.id] = spherePreview(app.textures[b.vis.tex], 144, { emissive: b.id === 'sun' }); } catch { app.previews[b.id] = null; } }
-  initModals(app); initPanels(app); initLab(app); initSurface(app);
+  initModals(app); initPanels(app); initLab(app); initSurface(app); initCareer(app); initCareerMenus(app, startCareerScene);
+  document.body.classList.toggle('cb', !!settings.colorblind);
+  startMenuParticles($('#menu-particles'), () => app.mode === 'menu');
+  const prime = () => { musicPrimed = true; if (app.mode === 'menu' || app.mode === 'quit') playMusic('menu'); removeEventListener('pointerdown', prime, true); removeEventListener('keydown', prime, true); };
+  addEventListener('pointerdown', prime, true); addEventListener('keydown', prime, true);
   // 3D
   try {
     const test = document.createElement('canvas');
@@ -104,13 +118,26 @@ async function boot() {
 // ---------------- Menu ----------------
 function initMenu() {
   $('#screen-menu').addEventListener('click', e => {
-    const a = e.target.closest('[data-action]')?.dataset.action; if (!a) return;
+    const a = e.target.closest('[data-action]')?.dataset.action; if (a) menuAction(a);
+  });
+  $('#btn-unquit').addEventListener('click', () => toMenu());
+}
+function menuAction(a) {
+  {
+    if (a === 'newgame') openNewGame();
+    if (a === 'resume') resumeGame();
+    if (a === 'training') openTrainingModules();
+    if (a === 'explore') openFreeExplore();
+    if (a === 'logbook') openLogbook();
+    if (a === 'achievements') openAchievements();
+    if (a === 'credits') openCredits();
+    if (a === 'quit') quitGame();
     if (a === 'start') { if (!app.scene) return no3D(); show('briefing'); renderBriefing(); setTimeout(() => $('#btn-begin').focus(), 50); }
     if (a === 'continue') { if (!app.scene) return no3D(); toGame(); app.scene.cinematicIntro(activeTargetOr('earth')); if (!activeMission()) startNextStory(); toast({ icon: '👋', title: 'Welcome back, Cadet', text: activeMission() ? `Current mission: ${activeMission().name}` : '' }); }
     if (a === 'archive' || a === 'lab' || a === 'explorer') open(a);
     if (a === 'settings') openSettings();
     if (a === 'surface') app.openSurface(null);
-  });
+  }
 }
 function activeTargetOr(d) { const m = activeMission(); return (m && m.target) || d; }
 function startNextStory() { for (const id of STORY_ORDER) if (missionState(id) !== 'complete' && !(id === 'orientation' && progress.tutorialSkipped)) { startMission(id); return; } }
@@ -161,9 +188,15 @@ function warp() {
 function initToolbar() {
   document.addEventListener('click', e => { const b = e.target.closest('[data-act]'); if (b && !b.closest('#screen-menu')) open(b.dataset.act); });
 }
+let musicPrimed = false;
 function applyJoystick() {
   document.body.classList.toggle('joy-on', settings.joystick === 'on');
   document.body.classList.toggle('joy-off', settings.joystick === 'off');
+  const b = document.body;
+  if (settings.controls === 'touch') b.classList.add('touch');
+  else if (settings.controls === 'kbm' || settings.controls === 'gamepad') b.classList.remove('touch');
+  else if (matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window) b.classList.add('touch');
+  b.classList.toggle('force-kbm', settings.controls === 'kbm' || settings.controls === 'gamepad');
 }
 
 // ---------------- Keyboard ----------------
@@ -174,6 +207,7 @@ function initKeys() {
     const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName) && e.target.type !== 'range';
     if (e.key === 'Escape') { e.preventDefault(); handleEsc(); return; }
     if (typing) return;
+    if (app.mode === 'career') return; // the career scene handles its own keys
     if (e.code === 'KeyH' && !e.ctrlKey && !e.metaKey) { if (!modalOpen()) openHelp(); return; }
     if (!app.inGame() || modalOpen()) return;
     const sc = app.scene;
@@ -202,6 +236,8 @@ function initKeys() {
 function handleEsc() {
   if (closeTopModal()) return;
   if (app.mode === 'surface') { surfaceEsc(); return; }
+  if (app.mode === 'career') { careerEsc(); return; }
+  if (app.mode === 'quit') { toMenu(); return; }
   if (['archive', 'explorer', 'lab'].includes(app.mode)) { app.returnTo === 'game' ? toGame() : toMenu(); return; }
   if (app.mode === 'briefing') { toMenu(); return; }
   if (app.mode === 'game') {

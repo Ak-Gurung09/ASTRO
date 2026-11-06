@@ -69,6 +69,7 @@ bus.on('toast', toast);
 
 // ---------- Sound (tiny WebAudio synth; no audio files) ----------
 let ac = null;
+export function audioCtx() { return ctx(); }
 function ctx() { if (!ac) { try { ac = new (window.AudioContext || window.webkitAudioContext)(); } catch { ac = null; } } return ac; }
 const SFX = {
   select: [[660, 0.06, 'sine', 0.05], [990, 0.08, 'sine', 0.04]],
@@ -88,7 +89,7 @@ bus.on('sfx', name => {
     let t = a.currentTime;
     for (const [f, d, type, vol] of SFX[name] || []) {
       const o = a.createOscillator(), g = a.createGain(); o.type = type; o.frequency.value = f;
-      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol * (settings.sfxVol ?? 1), t + 0.01); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
       o.connect(g).connect(a.destination); o.start(t); o.stop(t + d + 0.02); t += d * 0.8;
     }
   } catch {}

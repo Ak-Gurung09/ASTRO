@@ -19,14 +19,15 @@ const SETTINGS_KEY = 'astrolab.settings.v1';
 function readJSON(key) { try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : null; } catch { return null; } }
 function writeJSON(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); return true; } catch { return false; } }
 
-export const defaultSettings = () => ({ quality: 'auto', sound: true, reducedMotion: matchMedia?.('(prefers-reduced-motion: reduce)').matches || false, showOrbits: true, showLabels: true, textScale: 1, joystick: 'auto' });
+export const defaultSettings = () => ({ quality: 'auto', sound: true, reducedMotion: matchMedia?.('(prefers-reduced-motion: reduce)').matches || false, showOrbits: true, showLabels: true, textScale: 1, joystick: 'auto',
+  difficulty: 'normal', musicVol: 0.5, sfxVol: 0.8, textSpeed: 'normal', sensitivity: 1, invertY: false, subtitles: true, colorblind: false, language: 'en', controls: 'auto' });
 export const settings = Object.assign(defaultSettings(), readJSON(SETTINGS_KEY) || {});
 export function saveSettings() { writeJSON(SETTINGS_KEY, settings); bus.emit('settings', settings); }
 
 const freshProgress = () => ({
   version: 1, created: Date.now(), xp: 0, badges: [], cards: [], files: [], discovered: [], scanned: [], quizzesPassed: [],
   missions: {}, taskProgress: {}, activeMission: null, sims: {}, log: [], dailyDone: {},
-  stats: { perfectQuizzes: 0, quizzesTaken: 0, dailies: 0 }, tutorialSeen: false, surface: { sites: {}, jumps: {} }
+  stats: { perfectQuizzes: 0, quizzesTaken: 0, dailies: 0 }, tutorialSeen: false, surface: { sites: {}, jumps: {} }, career: null
 });
 
 export const progress = freshProgress();
@@ -35,6 +36,7 @@ export function loadSave() { const s = readJSON(SAVE_KEY); if (s) { Object.assig
 export function resetProgress() { try { localStorage.removeItem(SAVE_KEY); } catch {} Object.keys(progress).forEach(k => delete progress[k]); Object.assign(progress, freshProgress()); bus.emit('progress'); }
 let saveTimer = null;
 export function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => writeJSON(SAVE_KEY, progress), 150); }
+export function saveNow() { clearTimeout(saveTimer); writeJSON(SAVE_KEY, progress); }
 
 export function log(text, icon = '📡') {
   progress.log.unshift({ t: Date.now(), text, icon });

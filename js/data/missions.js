@@ -1,3 +1,4 @@
+import { CAREER_BADGES } from '../career/data/badges.js';
 // ASTRO LAB — Missions, badges and ranks (pure data + small predicate functions)
 import { BODY_MAP } from './solarSystem.js';
 import { SITES, SITE_MAP, SURFACE_BODIES } from './surfaces.js';
@@ -193,7 +194,8 @@ export const BADGES = [
   { id: 'lunar-explorer', name: 'Lunar Explorer', icon: '🌕', desc: 'Completed all three Moon expeditions.', check: p => ['tranquility', 'hadley', 'shackleton'].every(id => p.surface?.sites?.[id]?.complete) },
   { id: 'moon-hopper', name: 'Moon Hopper', icon: '🦘', desc: 'Completed expeditions on 5 different moons.', check: p => new Set(SITES.filter(s => p.surface?.sites?.[s.id]?.complete).map(s => s.body)).size >= 5 },
   { id: 'far-walker', name: 'Far Walker', icon: '🧑‍🚀', desc: 'Completed every surface expedition.', check: p => SITES.every(s => p.surface?.sites?.[s.id]?.complete) },
-  { id: 'daily-devotee', name: 'Daily Devotee', icon: '📅', desc: 'Completed 3 daily challenges.', check: p => p.stats.dailies >= 3 }
+  { id: 'daily-devotee', name: 'Daily Devotee', icon: '📅', desc: 'Completed 3 daily challenges.', check: p => p.stats.dailies >= 3 },
+  ...CAREER_BADGES
 ];
 export const BADGE_MAP = Object.fromEntries(BADGES.map(b => [b.id, b]));
 
