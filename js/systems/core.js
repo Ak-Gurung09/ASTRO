@@ -16,8 +16,23 @@ export const bus = {
 // ---------------- Safe storage ----------------
 const SAVE_KEY = 'astrolab.save.v1';
 const SETTINGS_KEY = 'astrolab.settings.v1';
-function readJSON(key) { try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : null; } catch { return null; } }
-function writeJSON(key, v) { try { localStorage.setItem(key, JSON.stringify(v)); return true; } catch { return false; } }
+function readJSON(key) {
+  let s = null;
+  try { s = localStorage.getItem(key); return s ? JSON.parse(s) : null; }
+  catch { if (s) { try { localStorage.setItem(key + '.corrupt', s); } catch {} } return null; } // keep a copy of an unreadable save
+}
+// Storage health: a failed write (quota full, private browsing, storage blocked) is reported once, not swallowed.
+let saveError = null;
+export const saveHealthy = () => !saveError;
+function writeJSON(key, v) {
+  try { localStorage.setItem(key, JSON.stringify(v)); if (saveError) { saveError = null; bus.emit('save:ok'); } return true; }
+  catch (e) {
+    const first = !saveError; saveError = e;
+    console.warn('[save] write failed', e);
+    if (first) bus.emit('toast', { icon: '⚠️', title: 'Progress not saved', text: /quota/i.test(`${e?.name} ${e?.message}`) ? 'Browser storage is full. Free some space or progress made now will be lost when you close the page.' : 'This browser is blocking storage (private mode or site-data settings). Progress will be lost when you close the page.', ms: 8000 });
+    return false;
+  }
+}
 
 export const defaultSettings = () => ({ quality: 'auto', sound: true, reducedMotion: matchMedia?.('(prefers-reduced-motion: reduce)').matches || false, showOrbits: true, showLabels: true, textScale: 1, joystick: 'auto',
   difficulty: 'normal', musicVol: 0.5, sfxVol: 0.8, textSpeed: 'normal', sensitivity: 1, invertY: false, subtitles: true, colorblind: false, language: 'en', controls: 'auto' });
@@ -32,11 +47,39 @@ const freshProgress = () => ({
 
 export const progress = freshProgress();
 export function hasSave() { return !!readJSON(SAVE_KEY); }
-export function loadSave() { const s = readJSON(SAVE_KEY); if (s) { Object.assign(progress, freshProgress(), s); progress.stats = Object.assign(freshProgress().stats, s.stats || {}); } return !!s; }
+// Keep only fields whose type matches the fresh save, so a damaged or hand-edited save can't break the game later.
+const STRING_LISTS = ['badges', 'cards', 'files', 'discovered', 'scanned', 'quizzesPassed'];
+export function sanitizeSave(s) {
+  if (!s || typeof s !== 'object' || Array.isArray(s)) return null;
+  const d = freshProgress(), out = {}, isObj = v => v && typeof v === 'object' && !Array.isArray(v);
+  for (const [k, v] of Object.entries(s)) {
+    const dv = d[k];
+    if (!(k in d)) out[k] = v; // fields from newer versions are kept as they are
+    else if (Array.isArray(dv)) { if (Array.isArray(v)) out[k] = STRING_LISTS.includes(k) ? v.filter(x => typeof x === 'string') : k === 'log' ? v.filter(x => isObj(x) && typeof x.text === 'string') : v; }
+    else if (k === 'activeMission') out[k] = typeof v === 'string' ? v : null;
+    else if (k === 'career') out[k] = isObj(v) ? v : null;
+    else if (isObj(dv)) { if (isObj(v)) out[k] = v; }
+    else if (typeof v === typeof dv && (typeof v !== 'number' || Number.isFinite(v))) out[k] = v;
+  }
+  const st = isObj(out.stats) ? out.stats : {}; out.stats = { ...d.stats };
+  for (const k of Object.keys(d.stats)) if (Number.isFinite(st[k])) out.stats[k] = st[k];
+  if (isObj(out.taskProgress)) for (const k of Object.keys(out.taskProgress)) if (!Array.isArray(out.taskProgress[k])) delete out.taskProgress[k];
+  return out;
+}
+export function loadSave() {
+  const raw = readJSON(SAVE_KEY), s = sanitizeSave(raw);
+  if (raw && !s) console.warn('[save] invalid save ignored');
+  if (s) Object.assign(progress, freshProgress(), s);
+  return !!s;
+}
 export function resetProgress() { try { localStorage.removeItem(SAVE_KEY); } catch {} Object.keys(progress).forEach(k => delete progress[k]); Object.assign(progress, freshProgress()); bus.emit('progress'); }
 let saveTimer = null;
-export function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => writeJSON(SAVE_KEY, progress), 150); }
-export function saveNow() { clearTimeout(saveTimer); writeJSON(SAVE_KEY, progress); }
+export function save() { clearTimeout(saveTimer); saveTimer = setTimeout(() => { saveTimer = null; writeJSON(SAVE_KEY, progress); }, 150); }
+export function saveNow() { clearTimeout(saveTimer); saveTimer = null; return writeJSON(SAVE_KEY, progress); }
+// Flush a pending (debounced) save before the page can go away: tab close, reload, app switch, mobile background.
+const flush = () => { if (saveTimer) saveNow(); };
+addEventListener('pagehide', flush); addEventListener('beforeunload', flush);
+document.addEventListener('visibilitychange', () => { if (document.hidden) flush(); });
 
 export function log(text, icon = '📡') {
   progress.log.unshift({ t: Date.now(), text, icon });

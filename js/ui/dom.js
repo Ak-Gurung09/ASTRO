@@ -80,7 +80,13 @@ const SFX = {
   badge: [[523, 0.1, 'triangle', 0.06], [659, 0.1, 'triangle', 0.06], [784, 0.25, 'triangle', 0.06]],
   complete: [[392, 0.12, 'triangle', 0.06], [523, 0.12, 'triangle', 0.06], [659, 0.12, 'triangle', 0.06], [784, 0.35, 'triangle', 0.07]],
   levelup: [[523, 0.1, 'square', 0.03], [784, 0.1, 'square', 0.03], [1047, 0.3, 'square', 0.03]],
-  scan: [[300, 0.4, 'sine', 0.03]]
+  scan: [[300, 0.4, 'sine', 0.03]],
+  // Surface expeditions (sound carried through the suit and rover frame, kept quiet: there is no air outside)
+  step: [[95, 0.05, 'triangle', 0.025]],
+  land: [[70, 0.14, 'triangle', 0.05]],
+  jet: [[190, 0.11, 'sawtooth', 0.008]],
+  rover: [[85, 0.13, 'square', 0.006]],
+  bump: [[60, 0.22, 'square', 0.045]]
 };
 bus.on('sfx', name => {
   if (!settings.sound) return; const a = ctx(); if (!a) return;

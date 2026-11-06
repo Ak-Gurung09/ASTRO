@@ -1,6 +1,6 @@
 // ASTRO LAB — boot, screen routing, keyboard controls and game flow
 import { $, $$, h, openModal, closeTopModal, modalOpen, closeAllModals, toast } from './ui/dom.js';
-import { bus, settings, progress, loadSave, hasSave, save, startMission, missionState, awardCard, activeMission, log, gameEvent } from './systems/core.js';
+import { bus, settings, progress, loadSave, hasSave, save, saveHealthy, startMission, missionState, awardCard, activeMission, log, gameEvent } from './systems/core.js';
 import { generateTexture, TEXTURE_IDS, spherePreview } from './scene/textures.js';
 import { upgradeMoonTextures } from './scene/realMaps.js';
 import { BODIES } from './data/solarSystem.js';
@@ -48,7 +48,7 @@ function show(id) {
   if (id === 'game') { renderTracker(); }
 }
 function toMenu() {
-  closeAllModals(); show('menu');
+  cancelBegin(); closeAllModals(); show('menu');
   $('#btn-resume').hidden = !careerStarted();
   $('#menu-note').textContent = !app.scene ? '3D view unavailable on this device. Archive, Explorer and Simulations still work.' : careerStarted() ? '' : 'New here? Press New Game to start your astronaut story.';
   app.scene?.deselect(); app.scene?.overview();
@@ -158,10 +158,16 @@ function initBriefing() {
   $('#btn-skip').addEventListener('click', () => begin(true));
   $('#btn-brief-back').addEventListener('click', () => toMenu());
 }
+// Begin / Skip start the game after a 650 ms warp. Only one start can be pending, and leaving the briefing
+// (← Main menu or Esc) cancels it, so a double-click can't start the mission twice.
+let beginTimer = null;
 function begin(skip) {
+  if (beginTimer) return;
   warp();
   progress.tutorialSeen = true; save();
-  setTimeout(() => {
+  beginTimer = setTimeout(() => {
+    beginTimer = null;
+    if (app.mode !== 'briefing') return;
     toGame();
     app.scene.cinematicIntro('earth');
     if (skip) { progress.tutorialSkipped = true; save(); log('Tutorial skipped — orientation remains available in the Journal.', '⏭'); if (missionState('homeworld') !== 'complete') startMission('homeworld'); else startNextStory(); }
@@ -170,7 +176,13 @@ function begin(skip) {
     renderTracker();
   }, settings.reducedMotion ? 0 : 650);
 }
+function cancelBegin() {
+  if (!beginTimer) return;
+  clearTimeout(beginTimer); beginTimer = null;
+  $$('.warp, .warp-lines').forEach(w => w.remove());
+}
 function skipTutorial() {
+  if (progress.tutorialSkipped && activeMission()?.id !== 'orientation') return; // already skipped (e.g. a double-click)
   progress.tutorialSkipped = true;
   if (activeMission()?.id === 'orientation') { progress.activeMission = null; save(); }
   startMission(missionState('homeworld') === 'complete' ? 'lunar' : 'homeworld');
@@ -181,7 +193,7 @@ function warp() {
   const cv = h('canvas', { class: 'warp-lines' }); document.body.append(cv, h('div', { class: 'warp' }));
   const ctx = cv.getContext('2d'); cv.width = innerWidth; cv.height = innerHeight; const cx = cv.width / 2, cy = cv.height / 2;
   const L = Array.from({ length: 220 }, () => ({ a: Math.random() * 6.28, r: Math.random() * 40, v: 4 + Math.random() * 16 }));
-  const t0 = performance.now(); (function step() { ctx.fillStyle = 'rgba(3,4,14,0.35)'; ctx.fillRect(0, 0, cv.width, cv.height); for (const l of L) { const r2 = l.r + l.v * 3; ctx.strokeStyle = `rgba(${150 + Math.random() * 100},${180 + Math.random() * 60},255,0.8)`; ctx.beginPath(); ctx.moveTo(cx + Math.cos(l.a) * l.r, cy + Math.sin(l.a) * l.r); ctx.lineTo(cx + Math.cos(l.a) * r2, cy + Math.sin(l.a) * r2); ctx.stroke(); l.r = r2; l.v *= 1.08; } if (performance.now() - t0 < 1100) requestAnimationFrame(step); else { cv.remove(); $$('.warp').forEach(w => w.remove()); } })();
+  const t0 = performance.now(), veil = $$('.warp').pop(); (function step() { if (!cv.isConnected) { veil?.remove(); return; } ctx.fillStyle = 'rgba(3,4,14,0.35)'; ctx.fillRect(0, 0, cv.width, cv.height); for (const l of L) { const r2 = l.r + l.v * 3; ctx.strokeStyle = `rgba(${150 + Math.random() * 100},${180 + Math.random() * 60},255,0.8)`; ctx.beginPath(); ctx.moveTo(cx + Math.cos(l.a) * l.r, cy + Math.sin(l.a) * l.r); ctx.lineTo(cx + Math.cos(l.a) * r2, cy + Math.sin(l.a) * r2); ctx.stroke(); l.r = r2; l.v *= 1.08; } if (performance.now() - t0 < 1100) requestAnimationFrame(step); else { cv.remove(); veil?.remove(); } })();
 }
 
 // ---------------- Toolbar ----------------
@@ -208,7 +220,8 @@ function initKeys() {
     if (e.key === 'Escape') { e.preventDefault(); handleEsc(); return; }
     if (typing) return;
     if (app.mode === 'career') return; // the career scene handles its own keys
-    if (e.code === 'KeyH' && !e.ctrlKey && !e.metaKey) { if (!modalOpen()) openHelp(); return; }
+    // H opens the help for the screen you're on: the surface controls during an expedition, the main help elsewhere
+    if (e.code === 'KeyH' && !e.ctrlKey && !e.metaKey && !e.altKey) { if (!modalOpen()) { if (app.mode !== 'surface') openHelp(); else if (app.surface?.running) app.surface.help(); } return; }
     if (!app.inGame() || modalOpen()) return;
     const sc = app.scene;
     if (MOVE.has(e.code)) { sc.keys.add(e.code); if (modTap) modTap.moved = true; if (e.code.startsWith('Arrow')) e.preventDefault(); return; }
@@ -242,7 +255,7 @@ function handleEsc() {
   if (app.mode === 'briefing') { toMenu(); return; }
   if (app.mode === 'game') {
     if (app.scene.selected) { app.scene.deselect(); return; }
-    const m = openModal({ title: '❚❚ Paused', label: 'Pause menu', body: '<p>Your progress is saved automatically.</p>', foot: [
+    const m = openModal({ title: '❚❚ Paused', label: 'Pause menu', body: saveHealthy() ? '<p>Your progress is saved automatically.</p>' : '<p>⚠️ Progress can\'t be saved right now: this browser is blocking or out of storage.</p>', foot: [
       h('button', { class: 'btn', onclick: () => { m.close(); toMenu(); } }, '☰ Main menu'),
       h('button', { class: 'btn', onclick: () => { m.close(); openHelp(); } }, '❔ Controls'),
       h('button', { class: 'btn primary', onclick: () => m.close() }, '▶ Resume')] });

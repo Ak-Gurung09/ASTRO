@@ -1,7 +1,7 @@
 // ASTRO LAB — Surface Expeditions: landing-site picker and screen flow
 import { SITES, SURFACE_BODIES, sitesFor } from '../data/surfaces.js';
 import { $, h, openModal, closeAllModals, toast } from './dom.js';
-import { progress, settings } from '../systems/core.js';
+import { progress, settings, saveHealthy } from '../systems/core.js';
 
 let app = null, game = null;
 export function initSurface(a) { app = a; }
@@ -33,30 +33,43 @@ export function openSitePicker(bodyId = null) {
   const m = openModal({ title: bodyId ? `Land on ${SURFACE_BODIES[bodyId].name}` : '🧑‍🚀 Surface Expeditions', wide: true, body });
 }
 
+// While the surface is being built, `landing` is set; Esc cancels it and nothing else can touch the half-built game.
+let landing = null;
 export async function startSurface(siteId) {
-  if (game) return;
+  if (game || landing) return;
   const test = document.createElement('canvas');
   if (!(test.getContext('webgl2') || test.getContext('webgl'))) { openModal({ title: '3D unavailable', body: '<p>Surface expeditions need WebGL.</p>' }); return; }
   closeAllModals();
   const screen = $('#screen-surface'); screen.innerHTML = '';
   const site = SITES.find(s => s.id === siteId);
-  const loading = h('div', { class: 'sx-loading' }, h('div', { class: 'logo-orbit' }, h('span', { class: 'logo-planet' })), h('p', {}, `Descending to ${site.name}…`), h('small', { class: 'muted' }, 'Building terrain from survey data'));
+  const me = landing = { cancelled: false };
+  const loading = h('div', { class: 'sx-loading' }, h('div', { class: 'logo-orbit' }, h('span', { class: 'logo-planet' })), h('p', {}, `Descending to ${site.name}…`), h('small', { class: 'muted' }, 'Building terrain from survey data'),
+    h('button', { class: 'btn sm ghost', style: 'margin-top:12px', onclick: () => cancelLanding() }, 'Cancel landing (Esc)'));
   screen.append(loading);
-  app.returnFromSurface = app.mode === 'menu' ? 'menu' : 'game';
+  app.returnFromSurface = app.mode === 'menu' || !app.scene ? 'menu' : 'game';
   app.show('surface');
-  const { SurfaceGame } = await import('../surface/surfaceGame.js');
-  game = app.surface = new SurfaceGame(app, siteId, onExit);
+  let g = null;
   try {
-    await game.build(screen);
-    game.buildHUD(screen); game.bindInput();
-    loading.remove(); game.start();
+    const { SurfaceGame } = await import('../surface/surfaceGame.js');
+    if (me.cancelled) throw new Error('cancelled');
+    g = new SurfaceGame(app, siteId, onExit); me.game = g;
+    await g.build(screen);
+    if (me.cancelled || g.disposed) throw new Error('cancelled');
+    g.buildHUD(screen); g.bindInput();
+    loading.remove(); landing = null;
+    game = app.surface = g; g.start();
   } catch (e) {
-    console.error(e); try { game.dispose(); } catch {}
+    landing = null;
+    try { g?.dispose(); } catch {}
     game = app.surface = null; screen.innerHTML = '';
-    toast({ icon: '⚠️', title: 'Landing aborted', text: 'The surface could not be built on this device.' });
-    app.toGame();
+    if (me.cancelled) toast({ icon: '↩', title: 'Landing cancelled', text: `You stayed in orbit above ${site.name}.`, ms: 2200 });
+    else { console.error(e); toast({ icon: '⚠️', title: 'Landing aborted', text: 'The surface could not be built on this device.' }); }
+    backToPrevious();
   }
 }
+function cancelLanding() { if (!landing) return; landing.cancelled = true; try { landing.game?.dispose(); } catch {} }
+// Back to wherever the expedition was launched from (main menu or the solar system)
+function backToPrevious() { if (app.returnFromSurface === 'menu' || !app.scene) app.toMenu(); else app.toGame(); }
 function onExit(site) {
   game = app.surface = null; $('#screen-surface').innerHTML = '';
   if (app.returnFromSurface === 'menu' || !app.scene) { app.toMenu(); return; }
@@ -65,8 +78,10 @@ function onExit(site) {
   toast({ icon: '🚀', title: 'Back in orbit', text: `Lifted off from ${site.name}.` });
 }
 export function surfaceEsc() {
-  if (!game) return false;
-  const m = openModal({ title: '❚❚ Expedition paused', body: `<p>${game.site.name}, ${game.body.name}. Objectives and samples are saved as you go.</p>`, foot: [
+  if (landing) { cancelLanding(); return true; } // still building: Esc cancels the landing instead of pausing
+  if (!game || !game.running) return false;
+  const saved = saveHealthy() ? 'Objectives and samples are saved as you go.' : '⚠️ Progress can\'t be saved right now: this browser is blocking or out of storage.';
+  const m = openModal({ title: '❚❚ Expedition paused', body: `<p>${game.site.name}, ${game.body.name}. ${saved}</p>`, foot: [
     h('button', { class: 'btn', onclick: () => { m.close(); game?.help(); } }, '❔ Controls'),
     h('button', { class: 'btn', onclick: () => { m.close(); game?.exit(); } }, '⏏ Lift off'),
     h('button', { class: 'btn primary', onclick: () => m.close() }, '▶ Resume')] });

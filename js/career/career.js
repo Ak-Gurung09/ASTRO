@@ -1,7 +1,7 @@
 // ASTRO LAB Career — scene runner: builds a first-person scene, runs the frame loop, pause, save and exit.
 import * as THREE from '../../vendor/three.module.js';
 import { $, h, openModal, closeAllModals, modalOpen, toast } from '../ui/dom.js';
-import { settings, progress, save, saveNow, addXP, awardBadge, log, bus } from '../systems/core.js';
+import { settings, progress, save, saveNow, saveHealthy, addXP, awardBadge, log, bus } from '../systems/core.js';
 import { World } from './engine/world.js';
 import { Input } from './engine/input.js';
 import { FPController } from './engine/fpController.js';
@@ -183,7 +183,7 @@ class Runtime {
   }
   pause() {
     if (this.paused || this.ending) return; this.paused = true; this.input.releaseLock();
-    const m = openModal({ title: '❚❚ Paused', label: 'Pause menu', body: `<p>${this.def.title}. ${this.mode === 'story' ? 'Your progress is saved automatically.' : 'Practice run: story progress is not affected.'}</p>`, onClose: () => { this.paused = false; }, foot: [
+    const m = openModal({ title: '❚❚ Paused', label: 'Pause menu', body: `<p>${this.def.title}. ${this.mode === 'story' ? (saveHealthy() ? 'Your progress is saved automatically.' : '⚠️ Progress can\'t be saved right now: this browser is blocking or out of storage.') : 'Practice run: story progress is not affected.'}</p>`, onClose: () => { this.paused = false; }, foot: [
       h('button', { class: 'btn', onclick: () => { m.close(); this.help(); } }, '❔ Controls'),
       h('button', { class: 'btn', onclick: () => { app.open('settings'); } }, '⚙ Settings'),
       h('button', { class: 'btn', onclick: () => { m.close(); this.exit(); } }, this.mode === 'story' ? '💾 Save & main menu' : '☰ Main menu'),
