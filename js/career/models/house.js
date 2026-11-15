@@ -2,6 +2,7 @@
 import * as THREE from '../../../vendor/three.module.js';
 import { TEX, MAT } from './materials.js';
 import { drawEmblem } from '../ui/letter.js';
+import { swapModel } from '../../assets/models.js';
 
 export const std = (color, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.7 }, o));
 export function box(w, hgt, d, mat, x = 0, y = 0, z = 0, parent) { const m = new THREE.Mesh(new THREE.BoxGeometry(w, hgt, d), mat); m.position.set(x, y, z); m.castShadow = m.receiveShadow = true; parent?.add(m); return m; }
@@ -70,7 +71,10 @@ export function makeAlarmClock() {
   const c = document.createElement('canvas'); c.width = 128; c.height = 64; const x = c.getContext('2d'); x.fillStyle = '#05080a'; x.fillRect(0, 0, 128, 64); x.fillStyle = '#ff4a3a'; x.font = 'bold 44px monospace'; x.textAlign = 'center'; x.fillText('7:00', 64, 48);
   const tex = new THREE.CanvasTexture(c); tex.colorSpace = THREE.SRGBColorSpace;
   const face = new THREE.Mesh(new THREE.PlaneGeometry(0.17, 0.085), new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 1.2 })); face.position.set(0, 0.055, 0.041); g.add(face);
-  box(0.06, 0.015, 0.03, std(0x9aa0aa), 0, 0.118, 0, g); g.userData.face = face; return g;
+  box(0.06, 0.015, 0.03, std(0x9aa0aa), 0, 0.118, 0, g); g.userData.face = face;
+  // imported clock; the glowing 7:00 display stays on its screen
+  swapModel(g, 'alarmclock', { size: 0.21, by: 'x' }, { keep: [face], after: h => { h.updateMatrixWorld(true); const b = new THREE.Box3().setFromObject(h), hgt = b.max.y - b.min.y; face.position.set(0, hgt * 0.47, b.max.z + 0.002); face.scale.set(0.92, 0.9, 1); } });
+  return g;
 }
 export function makeDesk() {
   const g = new THREE.Group(), w = std(0xd8c3a0, { map: TEX.wood([1, 0.5]) }), metal = MAT.metal(0x3c4250);

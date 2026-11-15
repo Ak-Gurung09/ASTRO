@@ -18,15 +18,31 @@ export class Floater {
   // Solid box obstacle: [x0, x1, y0, y1, z0, z1]
   addBox(b) { this.boxes.push(b); }
   // A yellow handrail between two points. Returns the mesh (a usable target "Handrail").
-  addRail(a, b, { label = 'Handrail', color = 0xf2b632 } = {}) {
+  // Every rail is anchored: it finds the nearest module surface (wall, floor or ceiling) and gets two standoff posts and
+  // base plates down to it, so no handrail ever hangs in mid-air. mount: optional [nx, ny, nz] direction to the surface.
+  addRail(a, b, { label = 'Handrail', color = 0xf2b632, mount = null } = {}) {
     const A = new THREE.Vector3(...a), B = new THREE.Vector3(...b), len = A.distanceTo(B);
     const g = new THREE.Group(), m = new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.2 });
-    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, len, 10), m); g.add(bar);
-    for (const s of [-1, 1]) { const f = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.018, 0.1, 8), m); f.position.set(0, s * (len / 2 - 0.05), 0.06); f.rotation.x = Math.PI / 2; g.add(f); }
-    const fat = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, len, 6), new THREE.MeshBasicMaterial({ visible: false })); g.add(fat);
-    g.position.copy(A).add(B).multiplyScalar(0.5); g.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize());
+    const metal = new THREE.MeshStandardMaterial({ color: 0x9aa3b2, roughness: 0.35, metalness: 0.8 });
+    const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, len, 12), m); bar.position.copy(A).add(B).multiplyScalar(0.5); bar.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), B.clone().sub(A).normalize()); g.add(bar);
+    // mount direction and distance: towards the closest bound of the module
+    const mid = A.clone().add(B).multiplyScalar(0.5), bd = this.bounds;
+    let dir = mount ? new THREE.Vector3(...mount).normalize() : null, gap = 0;
+    if (!dir) {
+      const c = [[mid.x - bd[0], [-1, 0, 0]], [bd[1] - mid.x, [1, 0, 0]], [mid.y - bd[2], [0, -1, 0]], [bd[3] - mid.y, [0, 1, 0]], [mid.z - bd[4], [0, 0, -1]], [bd[5] - mid.z, [0, 0, 1]]].sort((p, q) => p[0] - q[0])[0];
+      dir = new THREE.Vector3(...c[1]); gap = c[0];
+    } else { const k = ['x', 'y', 'z'].find(k => Math.abs(dir[k]) > 0.5); gap = dir[k] > 0 ? bd[{ x: 1, y: 3, z: 5 }[k]] - mid[k] : mid[k] - bd[{ x: 0, y: 2, z: 4 }[k]]; }
+    const ab = B.clone().sub(A).normalize();
+    for (const P of [A.clone().addScaledVector(ab, 0.06), B.clone().addScaledVector(ab, -0.06)]) {
+      const post = new THREE.Mesh(new THREE.CylinderGeometry(0.016, 0.016, gap, 8), metal); post.position.copy(P).addScaledVector(dir, gap / 2); post.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); g.add(post);
+      const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.015, 14), metal); plate.position.copy(P).addScaledVector(dir, gap - 0.006); plate.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir); g.add(plate);
+      const knuckle = new THREE.Mesh(new THREE.SphereGeometry(0.03, 10, 8), m); knuckle.position.copy(P); g.add(knuckle);
+    }
+    const fat = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, len, 6), new THREE.MeshBasicMaterial({ visible: false })); fat.position.copy(bar.position); fat.quaternion.copy(bar.quaternion); fat.userData.hitbox = true; g.add(fat);
+    g.traverse(o => { if (o.isMesh && o !== fat) { o.castShadow = true; o.receiveShadow = true; } });
     this.ctx.scene.add(g);
-    const rail = { A, B, obj: g };
+    g.userData.rail = true; g.userData.static = true; // anchored: never moves, never falls
+    const rail = { A, B, obj: g, bar };
     makeUsable(g, { label, verb: 'Grab', range: 1.9, enabled: () => this.enabled && this.rail !== rail, use: () => this.grab(rail) }); this.ctx.ix.add(g);
     this.rails.push(rail); return g;
   }
@@ -36,9 +52,11 @@ export class Floater {
     // hold the rail at arm's length: keep the body ~0.55 m from it on the side we came from
     const off = this.pos.clone().sub(this.grabPt); if (off.lengthSq() < 0.01) off.set(0, 0, 1); off.setLength(0.55); this.grabPt.add(off);
     this.vel.set(0, 0, 0); sfx.place(); this.ctx.hud.cap(hit > 0.9 ? '[Thump: you catch the rail hard]' : '[You catch the handrail]', 1600);
+    // feedback: the hand closes on the rail, and the rail glows while you hold it
+    this.ctx.hands?.grip(500); if (this.ctx.hands) this.ctx.hands.gripping = true; for (const r of this.rails) r.bar.material.emissive?.set(r === rail ? 0x6a4a00 : 0x000000);
     this.onGrab?.(rail, hit);
   }
-  release() { this.rail = null; }
+  release() { this.rail = null; if (this.ctx.hands) this.ctx.hands.gripping = false; for (const r of this.rails) r.bar.material.emissive?.set(0x000000); }
   lookDir(out = new THREE.Vector3()) { const p = this.ctx.player; return out.set(-Math.sin(p.yaw) * Math.cos(p.pitch), Math.sin(p.pitch), -Math.cos(p.yaw) * Math.cos(p.pitch)); }
   // E with nothing in view: pull gently towards the nearest rail on your safety tether (only when nearly stopped)
   reel() {
@@ -54,7 +72,7 @@ export class Floater {
     if (!blocked && this.enabled) {
       const fwd = I.move.y < -0.5, hard = I.held('sprint');
       if (this.rail && fwd) { // push off
-        this.rail = null; this.vel.copy(this.lookDir()).multiplyScalar(hard ? this.hardPush : this.push); this.pushes++; sfx.step('hard'); this.onPush?.(hard);
+        this.release(); this.ctx.hands?.release(); this.vel.copy(this.lookDir()).multiplyScalar(hard ? this.hardPush : this.push); this.pushes++; sfx.step('hard'); this.onPush?.(hard);
       } else if (this.water && !this.rail) { // fin kicks: slow but steerable
         const s = 0.55; const f = this.lookDir(), r = new THREE.Vector3(Math.cos(p.yaw), 0, -Math.sin(p.yaw));
         this.vel.addScaledVector(f, -I.move.y * s * dt * 1.6).addScaledVector(r, I.move.x * s * dt * 1.6);
@@ -85,5 +103,5 @@ export class Floater {
       else if (hit > 0.3) sfx.place();
     }
   }
-  dispose() { this.ctx.player.seat = null; }
+  dispose() { this.ctx.player.seat = null; if (this.ctx.hands) this.ctx.hands.gripping = false; }
 }

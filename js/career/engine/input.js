@@ -3,10 +3,10 @@ import { settings } from '../../systems/core.js';
 import { h } from '../../ui/dom.js';
 
 const ACTION_KEYS = {
-  use: ['KeyE', 'Enter'], drop: ['KeyG'], rotate: ['KeyR'], rotateBack: ['KeyQ'], crouch: ['KeyC', 'ControlLeft'], sprint: ['ShiftLeft', 'ShiftRight'],
+  use: ['KeyE', 'Enter'], drop: ['KeyG'], throw: ['KeyT'], skip: ['KeyX', 'Backspace'], spray: ['KeyF', 'Mouse0'], rotate: ['KeyR'], rotateBack: ['KeyQ'], crouch: ['KeyC', 'ControlLeft'], sprint: ['ShiftLeft', 'ShiftRight'],
   jump: ['Space'], inventory: ['KeyI', 'Tab'], help: ['KeyH'], objectives: ['KeyO'], letter: ['KeyL'], one: ['Digit1'], two: ['Digit2'], three: ['Digit3'], four: ['Digit4']
 };
-const PAD = { use: 0, back: 1, rotate: 2, drop: 3, crouch: 10, sprint: 11, pause: 9, help: 8 }; // standard mapping (A, B, X, Y, L3, R3, Start, Select)
+const PAD = { use: 0, back: 1, skip: 1, rotate: 2, drop: 3, inventory: 4, throw: 5, spray: 7, crouch: 10, sprint: 11, pause: 9, help: 8 }; // standard mapping (A, B, X, Y, LB, RB, L3, R3, Start, Select)
 
 export class Input {
   constructor(root, canvas) {
@@ -32,8 +32,8 @@ export class Input {
       if (this.pointerLocked()) { if (Math.abs(e.movementX) > 350 || Math.abs(e.movementY) > 350) return; /* ignore browser spikes */ this.look.x += e.movementX; this.look.y += e.movementY; this.lastDevice = 'kbm'; }
       else if (this.dragging === 'mouse') { this.look.x += e.movementX; this.look.y += e.movementY; }
     });
-    on(canvas, 'mousedown', e => { if (!this.pointerLocked() && e.button === 0 && !this.touch) this.dragging = 'mouse'; });
-    on(window, 'mouseup', () => { if (this.dragging === 'mouse') this.dragging = null; });
+    on(canvas, 'mousedown', e => { if (!this.pointerLocked() && e.button === 0 && !this.touch) this.dragging = 'mouse'; if (e.button === 0 && this.pointerLocked()) { if (!this.keys.has('Mouse0')) this.pressed.add('Mouse0'); this.keys.add('Mouse0'); } });
+    on(window, 'mouseup', e => { if (this.dragging === 'mouse') this.dragging = null; if (e.button === 0) this.keys.delete('Mouse0'); });
     on(document, 'pointerlockchange', () => { if (!this.pointerLocked()) this.onUnlock?.(); });
     // Touch look: drag anywhere on the canvas that isn't a control
     this.lookTouch = null;

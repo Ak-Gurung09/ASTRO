@@ -7,6 +7,8 @@ import { Input } from './engine/input.js';
 import { FPController } from './engine/fpController.js';
 import { Interactor } from './engine/interact.js';
 import { Carry } from './engine/carry.js';
+import { Hands } from './engine/hands.js';
+import { auditScene } from './engine/layers.js';
 import { Dialogue } from './engine/dialogue.js';
 import { CareerHUD } from './ui/hud.js';
 import { openResults } from './ui/results.js';
@@ -17,7 +19,7 @@ import { openCareerControls } from './ui/menus.js';
 import { openLetter } from './ui/letter.js';
 import { showIdCard } from './ui/idCard.js';
 
-const SCENES = { tutorial: () => import('./scenes/tutorial.js'), home: () => import('./scenes/home.js'), car: () => import('./scenes/car.js'), arrival: () => import('./scenes/arrival.js'), centre: () => import('./scenes/centre.js'), suit: () => import('./scenes/suit.js'), inspection: () => import('./scenes/inspection.js'), mobility: () => import('./scenes/mobility.js'), lowg: () => import('./scenes/lowg.js'), pool: () => import('./scenes/pool.js'), emergency: () => import('./scenes/emergency.js'), equipment: () => import('./scenes/equipment.js'), survival: () => import('./scenes/survival.js'), greenhouse: () => import('./scenes/greenhouse.js'), medical: () => import('./scenes/medical.js'), spacecraft: () => import('./scenes/spacecraft.js'), robotics: () => import('./scenes/robotics.js'), eva: () => import('./scenes/eva.js'), launch: () => import('./scenes/launch.js') };
+const SCENES = { tutorial: () => import('./scenes/tutorial.js'), home: () => import('./scenes/home.js'), car: () => import('./scenes/car.js'), arrival: () => import('./scenes/arrival.js'), centre: () => import('./scenes/centre.js'), suit: () => import('./scenes/suit.js'), inspection: () => import('./scenes/inspection.js'), mobility: () => import('./scenes/mobility.js'), lowg: () => import('./scenes/lowg.js'), pool: () => import('./scenes/pool.js'), emergency: () => import('./scenes/emergency.js'), equipment: () => import('./scenes/equipment.js'), survival: () => import('./scenes/survival.js'), greenhouse: () => import('./scenes/greenhouse.js'), medical: () => import('./scenes/medical.js'), spacecraft: () => import('./scenes/spacecraft.js'), robotics: () => import('./scenes/robotics.js'), eva: () => import('./scenes/eva.js'), launch: () => import('./scenes/launch.js'), powerlab: () => import('./scenes/powerlab.js'), moonpower: () => import('./scenes/moonpower.js') };
 export const SCENE_IDS = Object.keys(SCENES);
 let app = null, run = null;
 export function initCareer(a) {
@@ -78,14 +80,19 @@ class Runtime {
     hud.touch = input.touch;
     const ix = this.ix = new Interactor(world, player);
     const carry = this.carry = new Carry(world, player, ix, hud);
+    const hands = this.hands = new Hands(world); carry.hands = hands;
     const dlg = this.dlg = new Dialogue(screen);
     input.buildTouchUI(screen, [
       { action: 'use', icon: '✋', label: 'Use / pick up', short: 'Use', cls: 'big' },
       { action: 'crouch', icon: '⤵', label: 'Crouch (toggle)', short: 'Crouch' },
       { action: 'rotate', icon: '⟳', label: 'Rotate held item', short: 'Rotate' },
       { action: 'drop', icon: '⤓', label: 'Put down held item', short: 'Drop' },
+      { action: 'throw', icon: '↗', label: 'Throw held item', short: 'Throw' },
+      { action: 'inventory', icon: '🎒', label: 'Backpack: put away or take out', short: 'Pack' },
+      { action: 'spray', icon: '💨', label: 'Hold to spray', short: 'Spray', hold: true },
       { action: 'sprint', icon: '»', label: 'Hold to jog', short: 'Jog', hold: true }
     ]);
+    if (input.touchButtons?.spray) input.touchButtons.spray.hidden = true; // shown by scenes that have a spray tool
     input.onUnlock = () => { if (input.expectUnlock) { input.expectUnlock = false; return; } if (!this.dlg.active && !modalOpen() && !this.disposed) this.pause(); };
     input.onTap = (x, y) => { // tap an object to use it (touch)
       const r = world.renderer.domElement.getBoundingClientRect();
@@ -96,7 +103,7 @@ class Runtime {
     const steps = (this.def.steps || []).map(s => ({ ...s, done: !!st.steps?.[s.id] }));
     const self = this;
     this.ctx = {
-      THREE, world, scene: world.scene, player, ix, carry, hud, dlg, input, sfx, mode: this.mode, state: st, career: career(), diff: difficulty(),
+      THREE, world, scene: world.scene, player, ix, carry, hands, hud, dlg, input, sfx, mode: this.mode, state: st, career: career(), diff: difficulty(),
       steps, mistakes: st.mistakes || (st.mistakes = []),
       get name() { return career().player.name || 'Cadet'; },
       done(id) { const s = steps.find(x => x.id === id); if (!s || s.done) return false; s.done = true; (st.steps || (st.steps = {}))[id] = true; sfx.good(); self.refreshObjectives(); self.save(); return true; },
@@ -115,6 +122,10 @@ class Runtime {
       refreshObjectives: () => self.refreshObjectives()
     };
     this.api = await this.def.build(this.ctx);
+    // Anything tagged as portable by its model (clipboards, mugs, small boxes...) can be picked up, carried and put down
+    const loose = []; world.scene.traverse(o => { if (o.userData.portable && !o.userData.it && !o.userData.carry) loose.push(o); });
+    loose.forEach((o, i) => carry.makeCarriable(o, { id: 'loose' + i, name: o.userData.portable, critical: false }));
+    auditScene(world.scene); // render-order convention: transparent, decal and hit-box fixes (engine/layers.js)
     const c = career();
     if (resume && c.scene === this.def.id && c.pos) player.place(c.pos[0], c.pos[2], c.yaw || 0, c.pitch || 0, c.pos[1]);
     else player.place(...this.api.spawn);
@@ -154,7 +165,9 @@ class Runtime {
     this.player.update(dt);
     const it = blocked ? null : this.ix.update(dt);
     if (blocked) this.ix.update(0);
-    this.hud.showPrompt(it || (blocked ? null : this.api.defaultPrompt?.() || null), this.input.lastDevice);
+    this.hud.showPrompt(it || (blocked ? null : this.api.defaultPrompt?.() || null), this.input.lastDevice, !blocked && this.carry.held && !it);
+    const hp = this.carry.hold.position; this.hands.update(dt, { focus: !!it, holding: this.carry.held, big: this.carry.heldBig, holdAt: [hp.x, hp.y, hp.z], half: this.carry.heldHalf || 0.1, hidden: (blocked && !this.dlg.active) || this.api.hideHands?.() });
+    const cine = !this.paused && !modalOpen() && this.api.cinematic?.(); this.hud.setSkip(cine ? () => this.api.skipCinematic?.() : null);
     const I = this.input;
     if (!blocked) {
       if (I.hit('use')) { if (it) it.use(); else this.api.onUse?.(); }
@@ -162,10 +175,14 @@ class Runtime {
       if (I.hit('rotate')) this.carry.rotate(1);
       if (I.hit('rotateBack')) this.carry.rotate(-1);
       if (I.hit('drop')) { if (this.carry.held) this.carry.drop(); }
+      if (I.hit('throw') && this.carry.held) this.carry.throw();
+      if (I.hit('inventory') && (this.carry.held || this.carry.stowed.length)) this.carry.stow();
+      if (cine && I.hit('skip')) this.api.skipCinematic?.();
       if (I.hit('help')) this.help();
       if (I.hit('pause')) this.pause();
     } else if (this.dlg.active) {
       if (I.padActions?.has(0)) this.dlg.padNext?.();
+      if (I.padActions?.has(1)) this.dlg.skip?.(); // B = skip conversation
       [0, 1, 2, 3].forEach(k => { if (I.padActions?.has(12 + k)) this.dlg.padChoose?.(k); }); // d-pad picks choices
     }
     this.carry.update(dt);
@@ -209,7 +226,7 @@ class Runtime {
     openResults({ chapter: true, title, science, rewards, next, continueLabel, onContinue: () => { this.ending = false; onContinue ? onContinue(this) : this.exit(); } });
   }
   exit() { if (this.disposed) return; this.save(); this.dispose(); run = null; $('#screen-career').innerHTML = ''; stopAmbience(); playMusic('menu'); app.toMenu(); }
-  dispose() { this.disposed = true; $('#screen-career')?.classList.remove('cx-seated'); this.world.dispose(); this.input.dispose(); this.api?.dispose?.(); }
+  dispose() { this.disposed = true; $('#screen-career')?.classList.remove('cx-seated'); this.hands?.dispose(); this.world.dispose(); this.input.dispose(); this.api?.dispose?.(); }
 }
 
 export function careerEsc() { if (!run) return false; if (!run.paused) run.pause(); return true; }

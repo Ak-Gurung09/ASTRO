@@ -1,6 +1,7 @@
 // ASTRO LAB — models for surface expeditions, built in code (no external assets).
 // Materials use small procedural textures (suit fabric, crinkled foil, wire-mesh tyres, rock grain).
 import * as THREE from '../../vendor/three.module.js';
+import { whenModel, instance, fit, markImported, makeRetarget } from '../assets/models.js';
 
 // ---------------- procedural textures ----------------
 const cache = {};
@@ -138,7 +139,27 @@ export function makeAstronaut() {
   const armL = arm(-1), armR = arm(1), legL = leg(-1), legR = leg(1);
   shadowAll(root);
   root.userData = { hips, spine, head, armL, armR, legL, legR };
+  attachAstronautModel(root);
   return root;
+}
+// Imported astronaut: driven by the procedural joints above (walk, lope, crouch, jumps and the rover seat all keep working).
+function attachAstronautModel(root) {
+  const u = root.userData, proc = []; root.traverse(o => { if (o.isMesh) proc.push(o); });
+  whenModel('astronaut', gltf => {
+    if (u.model) return;
+    const obj = instance(gltf);
+    const holder = markImported(fit(obj, { size: 1.9, by: 'height', rotY: Math.PI })); // the model faces +z, this rig faces -z
+    root.add(holder);
+    // measure in the rest pose, then put the current pose back
+    const saved = []; root.traverse(o => { if (!o.isMesh && o !== root && !o.userData.importedPart) saved.push([o, o.quaternion.clone(), o.position.clone()]); });
+    for (const [o] of saved) o.rotation.set(0, 0, 0); u.hips.position.y = LEG.hipY; root.updateMatrixWorld(true);
+    const rt = makeRetarget(obj, root, { hips: u.spine, head: u.head, upperArmL: u.armL.sh, foreArmL: u.armL.el, handL: u.armL.wr, upperArmR: u.armR.sh, foreArmR: u.armR.el, handR: u.armR.wr,
+      thighL: u.legL.hp, calfL: u.legL.kn, thighR: u.legR.hp, calfR: u.legR.kn }, { procFwd: -1, hipsFrom: u.hips });
+    for (const [o, q, p] of saved) { o.quaternion.copy(q); o.position.copy(p); }
+    if (!rt) { root.remove(holder); return; }
+    for (const m of proc) m.visible = false;
+    u.model = { holder, rt };
+  });
 }
 
 // Procedural animator: walk, low-gravity lope ("bunny hop"), idle, crouch, air, landing and seated poses,
@@ -222,6 +243,7 @@ export class AstroAnimator {
     const standY = LEG.ankleH + legDrop;
     u.hips.position.y = s.seated ? 0.4 : (standY + pose.bounce) * (1 - w.air) + LEG.hipY * w.air;
     u.hips.rotation.x = s.seated ? 0 : -0.15 * cr;
+    if (u.model) u.model.rt.update();
     for (const k of steps) this.onStep(k);
   }
 }

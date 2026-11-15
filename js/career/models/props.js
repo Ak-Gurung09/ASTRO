@@ -35,6 +35,20 @@ export function makeSlidingDoor(w = 1.2, hgt = 2.2, label = 'EXIT') {
 }
 export function openDoor(door, dt, open = true) { const L = door.userData.leaf, target = open ? door.userData.w + 0.05 : 0; L.position.x += (target - L.position.x) * Math.min(1, dt * 3); return Math.abs(target - L.position.x) < 0.02; }
 export function makeSign(text, sub = '', w = 1.6, col) { const m = new THREE.Mesh(new THREE.PlaneGeometry(w, w * 0.375), MAT.std({ map: TEX.sign(text, sub, col), roughness: 0.6 })); return m; }
+// A free-standing sign: the board is mounted on a backing panel held up by two posts set into the ground
+// (instead of a bare sign floating in mid-air). centreY = height of the board's centre above the ground.
+export function makeSignBoard(text, sub = '', w = 1.2, col, centreY = 1.25) {
+  const g = new THREE.Group(), hgt = w * 0.375, metal = MAT.metal(0x8a8f99);
+  const back = new THREE.Mesh(new THREE.BoxGeometry(w + 0.06, hgt + 0.06, 0.04), MAT.std({ color: 0x2a2d33, roughness: 0.6 })); back.position.set(0, centreY, -0.03); g.add(back);
+  const face = makeSign(text, sub, w, col); face.position.set(0, centreY, 0.0); g.add(face);
+  face.material.polygonOffset = true; face.material.polygonOffsetFactor = -2; face.material.polygonOffsetUnits = -8; face.renderOrder = 2;
+  for (const sx of [-1, 1]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.035, centreY + hgt / 2, 10), metal); post.position.set(sx * (w / 2 - 0.08), (centreY + hgt / 2) / 2, -0.07); g.add(post);
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.1, 0.06, 12), MAT.std({ color: 0x5a5048, roughness: 1 })); foot.position.set(sx * (w / 2 - 0.08), 0.03, -0.07); g.add(foot);
+  }
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  g.userData.face = face; return g;
+}
 export function makeRing(r = 0.6, color = 0xffc857) {
   const m = new THREE.Mesh(new THREE.RingGeometry(r * 0.8, r, 48), new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, side: THREE.DoubleSide }));
   m.rotation.x = -Math.PI / 2; m.position.y = 0.01; return m;

@@ -8,9 +8,11 @@ import { std, box, cyl } from '../models/house.js';
 import { makeTerminal, makeScreen, infoScreen } from '../models/centre.js';
 import { LOOKS } from '../data/people.js';
 import { makeUsable } from '../engine/interact.js';
+import { whenModel, instance, fit, markImported } from '../../assets/models.js';
 import { trainingRoom, instructor, timer, finishExercise } from './kit.js';
 import { runQuiz, readDoc, pickOne } from '../ui/panels.js';
 import { h, openModal } from '../../ui/dom.js';
+import { makeAssembly } from './assembly.js';
 import { CATALOG, CAT_MAP, CROPS, STAGES, BUILD, FAULTS, REGOLITH_FACTS, newSystems, stepSystems, cropHealth } from '../data/greenhouse.js';
 
 const REPORT_Q = [
@@ -27,15 +29,16 @@ export default {
     { id: 'brief', text: 'Talk to Dr. Osei, the mission botanist' },
     { id: 'store', text: 'Buy the parts you need at the supply terminal' },
     { id: 'build', text: 'Build the greenhouse: 11 steps' },
-    { id: 'plant', text: 'Choose and plant two crops' },
+    { id: 'lifesupport', text: 'Life support: service the air unit (fans off, swap the CO₂ cartridge, restart)' },
+    { id: 'plant', text: 'Choose two crops, plant the seedling trays and water both beds' },
     { id: 'grow', text: 'Mission GREENHOUSE-01: keep both crops healthy until harvest' },
     { id: 'harvest', text: 'Harvest both crops' },
     { id: 'report', text: 'File the mission report' }
   ],
-  initialState: { steps: {}, mistakes: [], bought: [], spent: 0, built: [], regolithOK: false, crops: [], prog: {}, sys: null, plan: null, faultAt: {}, warned: {}, yield: {}, day: 0 },
+  initialState: { steps: {}, mistakes: [], asmActive: null, ls: {}, planting: null, bought: [], spent: 0, built: [], regolithOK: false, crops: [], prog: {}, sys: null, plan: null, faultAt: {}, warned: {}, yield: {}, day: 0 },
 
   async build(ctx) {
-    const { scene, player, ix, hud, sfx, state } = ctx;
+    const { scene, player, ix, hud, sfx, state, carry } = ctx;
     trainingRoom(ctx, { w: 26, d: 22, hgt: 9, title: 'LUNAR SURFACE ANALOGUE', sub: 'Greenhouse build site', bg: 0x05060a, light: 0.8 });
     // grey regolith floor over the hangar floor, and a painted Earth on the far wall
     const rg = (() => { const c = document.createElement('canvas'); c.width = c.height = 256; const x = c.getContext('2d'); x.fillStyle = '#8a8a88'; x.fillRect(0, 0, 256, 256); for (let i = 0; i < 9000; i++) { const g = 100 + Math.random() * 80; x.fillStyle = `rgba(${g},${g},${g - 4},.5)`; x.fillRect(Math.random() * 256, Math.random() * 256, 2, 2); } const t = new THREE.CanvasTexture(c); t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(10, 9); t.colorSpace = THREE.SRGBColorSpace; return t; })();
@@ -78,18 +81,32 @@ export default {
     const piece = {
       site: () => { const g = new THREE.Group(); box(11, 0.08, 10, std(0xb8bec8, { roughness: 0.7 }), 0, 0.04, 1, g); for (let x = -5; x <= 5; x += 2.2) box(0.03, 0.09, 10, std(0x8a90a0), x, 0.045, 1, g); return g; },
       frame: () => { const g = new THREE.Group(); for (let z = -3.8; z <= 5.8; z += 1.6) { const r = new THREE.Mesh(new THREE.TorusGeometry(5.4, 0.06, 6, 32, Math.PI), MAT.metal(0xb8bec8)); r.position.set(0, 0, z); r.scale.y = 0.62; g.add(r); } return g; },
-      shell: () => { const g = new THREE.Group(); const s = new THREE.Mesh(new THREE.CylinderGeometry(5.5, 5.5, 9.8, 40, 1, true, -Math.PI / 2, Math.PI), glass); s.rotation.x = -Math.PI / 2; s.scale.set(1, 1, 0.62); s.position.z = 1; g.add(s); const w = new THREE.Mesh(new THREE.CircleGeometry(5.5, 40, 0, Math.PI), glass); w.scale.y = 0.62; w.position.z = -3.9; g.add(w); return g; },
-      airlock: () => { const g = new THREE.Group(); box(2, 2.4, 1.6, std(0xe8ebf0, { roughness: 0.5 }), 0, 1.2, 6.7, g); box(1, 2, 0.05, std(0x3a3f4a), 0, 1, 7.52, g); return g; },
+      shell: () => { const g = new THREE.Group(); g.add(frontWall()); const s = new THREE.Mesh(new THREE.CylinderGeometry(5.5, 5.5, 9.8, 40, 1, true, -Math.PI / 2, Math.PI), glass); s.rotation.x = -Math.PI / 2; s.scale.set(1, 1, 0.62); s.position.z = 1; g.add(s); const w = new THREE.Mesh(new THREE.CircleGeometry(5.5, 40, 0, Math.PI), glass); w.scale.y = 0.62; w.position.z = -3.9; g.add(w); return g; },
+      // hollow airlock you can walk through: two side walls, a roof, a floor plate and a sliding outer door
+      airlock: () => { const g = new THREE.Group(), wm = std(0xe8ebf0, { roughness: 0.5 }); for (const sx of [-1, 1]) box(0.08, 2.4, 1.6, wm, sx * 1.0, 1.2, 6.7, g); box(2.08, 0.08, 1.6, wm, 0, 2.44, 6.7, g); box(2.0, 0.04, 1.6, std(0x9aa0aa), 0, 0.02, 6.7, g);
+        for (const sx of [-1, 1]) box(0.45, 2.4, 0.08, wm, sx * 0.78, 1.2, 7.5, g); box(1.2, 0.3, 0.08, wm, 0, 2.25, 7.5, g);
+        const door = box(1.1, 2.1, 0.05, std(0x3a3f4a), 0, 1.05, 7.56, g); const win = new THREE.Mesh(new THREE.CircleGeometry(0.16, 20), new THREE.MeshStandardMaterial({ color: 0x9ac8f0, transparent: true, opacity: 0.5 })); win.position.set(0, 0.5, 0.03); door.add(win); g.userData.door = door; return g; },
       power: () => { const g = new THREE.Group(); for (let i = 0; i < 3; i++) { const p = new THREE.Group(); box(1.6, 0.04, 1, std(0x1a2a5a, { metalness: 0.4, roughness: 0.3 }), 0, 0, 0, p); p.rotation.x = -0.5; p.position.set(-8.6 + i * 1.8, 1.1, 5.4); g.add(p); cyl(0.04, 0.04, 1, MAT.metal(), -8.6 + i * 1.8, 0.5, 5.4, g, 6); } box(0.8, 0.6, 0.5, std(0x3a3f4a), -6.6, 0.3, 4.4, g); return g; },
-      lights: () => { const g = new THREE.Group(), eff = has('ledEff'); for (const x of [-1.3, 1.3]) for (const z of [-1.5, 0, 1.5]) box(1.0, 0.05, 0.3, MAT.glow(eff ? 0xd04aff : 0xfff4e0, 1.4), x, 2.4, z, g); const l = new THREE.PointLight(eff ? 0xd06aff : 0xfff2e0, 6, 8, 1.4); l.position.set(0, 2.2, 0); g.add(l); return g; },
-      air: () => { const g = new THREE.Group(); box(0.8, 1.2, 0.6, std(0xd9dce2), -4.6, 0.6, -2.6, g); cyl(0.25, 0.25, 0.1, std(0x3a3f4a), -4.6, 0.9, -2.28, g).rotation.x = Math.PI / 2; box(0.5, 0.7, 0.4, std(0xc8502a), -3.6, 0.35, -2.8, g); return g; },
+      // the grow-light rack and the air unit are assembled by hand (see the assemblies below); these add the finishing touches
+      lights: () => { const g = new THREE.Group(), eff = has('ledEff'); const l = new THREE.PointLight(eff ? 0xd06aff : 0xfff2e0, 6, 8, 1.4); l.position.set(0, 2.2, 0); g.add(l); setLeds(true); return g; },
+      air: () => new THREE.Group(),
       water: () => { const g = new THREE.Group(); cyl(0.55, 0.55, 1.5, std(0x5a9ad8, { roughness: 0.3 }), 4.2, 0.75, -2.8, g); box(0.4, 0.3, 0.3, std(0x3a3f4a), 3.4, 0.15, -2.4, g); box(0.4, 0.3, 0.3, std(0x3a3f4a), 3.4, 0.15, -3.1, g); return g; },
       recycler: () => { const g = new THREE.Group(); box(0.9, 1.3, 0.7, std(0xe8ebf0), 4.2, 0.65, 2.4, g); box(0.3, 0.3, 0.05, std(0x2b6ad8), 4.2, 0.9, 2.02, g); return g; },
       beds: () => { const g = new THREE.Group(), soil = has('hydro') ? std(0xf2f2f2) : std(0x6a5a48, { roughness: 1 }); for (const x of [-1.3, 1.3]) { box(1.1, 0.5, 4.2, std(0xd9dce2), x, 0.25, 0, g); box(1.0, 0.04, 4.1, has('hydro') ? std(0x7ab8d8, { roughness: 0.2 }) : soil, x, 0.51, 0, g); } return g; },
       control: () => { const g = new THREE.Group(); return g; }
     };
     const markers = {}, built = {};
-    function showPiece(id) { const p = piece[id](); p.traverse(o => { if (o.isMesh && !o.material.transparent) { o.castShadow = true; o.receiveShadow = true; } }); G.add(p); built[id] = p; }
+    // Collision for every built piece (no walking through tanks, beds or the dome), and the glass dome blocks using things through it
+    const COLS = { shell: [[-5.2, -5.0, -3.9, 5.9], [5.0, 5.2, -3.9, 5.9], [-5.5, 5.5, -4.0, -3.85], [-5.5, -0.62, 5.85, 5.95], [0.62, 5.5, 5.85, 5.95]], airlock: [[-1.06, -0.94, 5.9, 7.5], [0.94, 1.06, 5.9, 7.5], [-1.0, -0.55, 7.46, 7.54], [0.55, 1.0, 7.46, 7.54]],
+      water: [[3.6, 4.8, -3.4, -2.2], [3.15, 3.65, -3.3, -2.2]], recycler: [[3.7, 4.7, 2.0, 2.8]], beds: [[-1.9, -0.7, -2.15, 2.15], [0.7, 1.9, -2.15, 2.15]], control: [[-4.72, -4.48, 2.08, 2.32]], power: [[-7.05, -6.15, 4.1, 4.7], [-8.65, -8.55, 5.35, 5.45], [-6.85, -6.75, 5.35, 5.45], [-5.05, -4.95, 5.35, 5.45]] };
+    function showPiece(id) { const p = piece[id](); p.traverse(o => { if (o.isMesh && !o.material.transparent) { o.castShadow = true; o.receiveShadow = true; } }); G.add(p); built[id] = p;
+      for (const [x0, x1, z0, z1] of COLS[id] || []) player.addBox(x0, x1, z0, z1, 0, id === 'beds' ? 1 : 3);
+      if (id === 'shell') { p.userData.blocker = true; ix.blockers.push(p); }
+    }
+    function frontWall() { // the dome's front end, with a doorway into the airlock
+      const sh = new THREE.Shape(); sh.moveTo(-5.5, 0); for (let i = 1; i < 40; i++) { const a = Math.PI - i / 40 * Math.PI; sh.lineTo(Math.cos(a) * 5.5, Math.sin(a) * 5.5 * 0.62); } sh.lineTo(5.5, 0); sh.lineTo(0.6, 0); sh.lineTo(0.6, 2.1); sh.lineTo(-0.6, 2.1); sh.lineTo(-0.6, 0); sh.lineTo(-5.5, 0);
+      const m = new THREE.Mesh(new THREE.ShapeGeometry(sh), glass); m.position.z = 5.9; return m;
+    }
     BUILD.forEach((b, i) => {
       const m = new THREE.Group(); const ring = new THREE.Mesh(new THREE.TorusGeometry(0.45, 0.04, 8, 32), MAT.glow(0xffc857, 0.8)); ring.rotation.x = Math.PI / 2; ring.position.y = 0.06; m.add(ring);
       const post = new THREE.Mesh(new THREE.BoxGeometry(0.7, 1.4, 0.7), new THREE.MeshBasicMaterial({ visible: false })); post.position.y = 0.7; m.add(post);
@@ -111,24 +128,188 @@ export default {
         await readDoc({ title: '🪨 Process the regolith', body: h('div', {}, h('ul', {}, REGOLITH_FACTS.map(f => h('li', {}, f))), h('p', {}, 'Run each stage of the processor:')), ticks: ['Sieve out sharp rocks and fine dust', 'Wash out harmful salts', 'Mix in compost, nitrogen and nutrients'], confirm: 'Fill the beds ▸' });
         state.regolithOK = true;
       }
+      if (ASM[b.id]) { // hands-on assembly: lay the parts out on the workbench and install them one by one
+        if (state.asmActive !== b.id) { state.asmActive = b.id; sfx.ui(); hud.flash(`${ASM[b.id].title}: pick up each part from the workbench and install it where the blue outline shows. Wrong parts won't fit.`, '', 6000); ctx.refreshObjectives(); }
+        else hud.flash(`Install the remaining parts: ${ASM[b.id].installed()} of ${ASM[b.id].parts} done.`, '', 3000);
+        markers[b.id].visible = false; return;
+      }
       busy = true; ctx.input.releaseLock(); sfx.ui(); hud.cap(`[Clank, whirr: ${b.name.toLowerCase()}]`, 1600);
       const r = markers[b.id].children[0]; r.material.color.set(0x5ad8ff); r.material.emissive.set(0x5ad8ff);
       await new Promise(res => setTimeout(res, 1200));
-      busy = false; state.built.push(b.id); showPiece(b.id); markers[b.id].visible = false; drawPallets(); sfx.place();
+      busy = false; completeBuild(b);
+    }
+    function completeBuild(b) {
+      state.built.push(b.id); showPiece(b.id); markers[b.id].visible = false; drawPallets(); sfx.place(); if (state.asmActive === b.id) state.asmActive = null;
       if (b.id === 'beds' && has('hydro')) state.regolithOK = true;
       const n = state.built.length; hud.flash(`Step ${n} of 11 done: ${b.name}.`, 'good', 2500);
       ctx.steps.find(s => s.id === 'build').text = `Build the greenhouse: ${n} of 11 steps`; ctx.refreshObjectives();
-      if (n === BUILD.length) { ctx.done('build'); controlScreen.visible = true; hud.flash('Greenhouse complete and pressurised! Talk to Dr. Osei to plant your crops.', 'good', 4500); }
+      if (n === BUILD.length) { ctx.done('build'); controlScreen.visible = true; hud.flash('Greenhouse complete and pressurised! Before planting: the life-support air unit needs its first service. Its status light is red.', 'good', 5500); }
     }
     // control panel (appears with step 11)
     const controlScreen = makeScreen(1.0, 0.65, infoScreen('GREENHOUSE CONTROL', ['Systems offline'], { w: 512, hgt: 320 }), [512, 320]);
     controlScreen.position.set(-4.6, 1.5, 2.2); controlScreen.rotation.y = Math.PI / 2; controlScreen.visible = false; scene.add(controlScreen);
     box(0.1, 1.2, 0.1, MAT.metal(), 0, -0.6, -0.05, controlScreen);
+
+    // ================= Hands-on assembly (11B): the grow-light rack and the life-support air unit =================
+    const metal = MAT.metal(0xb8bec8), ledCol = () => has('ledEff') ? 0xd04aff : 0xfff4e0;
+    // grow-light rack: a frame hanging over the beds; two LED panels, a driver and a light sensor are fitted into it
+    const lightRig = new THREE.Group(); lightRig.position.set(0, 2.55, 0); scene.add(lightRig);
+    for (const x of [-2.0, 2.0]) box(0.06, 0.06, 4.3, metal, x, 0, 0, lightRig);
+    for (const z of [-2.15, 2.15]) box(4.06, 0.06, 0.06, metal, 0, 0, z, lightRig);
+    for (const x of [-2.0, 2.0]) for (const z of [-2.15, 2.15]) cyl(0.008, 0.008, 0.7, std(0x222222), x, 0.35, z, lightRig, 4);
+    const ledMats = [];
+    const ledPanel = () => { const g = new THREE.Group(); box(1.0, 0.05, 1.6, std(0x30343c, { roughness: 0.5 }), 0, 0.025, 0, g); for (const z of [-0.55, 0, 0.55]) { const m = MAT.glow(ledCol(), 0.05); ledMats.push(m); box(0.85, 0.02, 0.3, m, 0, -0.005, z, g); } return g; };
+    const ASM = {};
+    const asmLights = ASM.lights = Object.assign(makeAssembly(ctx, {
+      key: 'asmLights', title: 'Grow-light rack', chassis: lightRig, bench: [-3.3, 0.4, Math.PI / 2],
+      active: () => state.asmActive === 'lights' && !state.built.includes('lights'),
+      parts: [
+        { id: 'ledA', name: 'LED panel (left)', make: ledPanel, slot: [-1.3, -0.08, 0] },
+        { id: 'ledB', name: 'LED panel (right)', make: ledPanel, slot: [1.3, -0.08, 0] },
+        { id: 'driver', name: 'LED driver box', make: () => { const g = new THREE.Group(); box(0.32, 0.14, 0.22, std(0x2a2d33), 0, 0.07, 0, g); box(0.05, 0.03, 0.01, MAT.glow(0x3fe0a0, 1), 0.1, 0.1, 0.115, g); return g; }, slot: [0, -0.17, -2.15] },
+        { id: 'sensor', name: 'Light sensor', make: () => { const g = new THREE.Group(); cyl(0.06, 0.07, 0.05, std(0xe8ebf0), 0, 0.025, 0, g, 14); const d = new THREE.Mesh(new THREE.SphereGeometry(0.05, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), std(0xfff4c0, { roughness: 0.2 })); d.position.y = 0.05; g.add(d); return g; }, slot: [0, -0.11, 2.15] }],
+      decoys: [{ id: 'pumpX', name: 'Spare water pump', why: 'Pumps belong to the water system, not the light rack.', make: () => { const g = new THREE.Group(); cyl(0.09, 0.09, 0.22, std(0x2b6ad8), 0, 0.11, 0, g, 14); box(0.2, 0.04, 0.12, std(0x3a3f4a), 0, 0.02, 0, g); return g; } }],
+      onDone: () => { completeBuild(BUILD.find(b => b.id === 'lights')); hud.flash('Grow-light rack assembled and switched on!', 'good', 3500); }
+    }), { title: 'Grow-light rack', parts: 4 });
+    function setLeds(on) { for (const m of ledMats) { m.color.set(ledCol()); m.emissive.set(ledCol()); m.emissiveIntensity = on ? 1.4 : 0.05; } }
+    // air unit (life support): an open cabinet; fan module, heater core, CO2 scrubber cartridge and O2 sensor are fitted into it
+    const airUnit = new THREE.Group(); airUnit.position.set(-4.6, 0, -2.6); airUnit.rotation.y = Math.PI / 2; scene.add(airUnit);
+    { const wm = std(0xd9dce2, { roughness: 0.5 }); box(0.9, 1.4, 0.04, wm, 0, 0.7, -0.28, airUnit); for (const sx of [-1, 1]) box(0.04, 1.4, 0.6, wm, sx * 0.45, 0.7, 0, airUnit); box(0.94, 0.04, 0.6, wm, 0, 1.42, 0, airUnit); box(0.9, 0.06, 0.6, std(0x5a5f6a), 0, 0.03, 0, airUnit); box(0.86, 0.02, 0.5, std(0x9aa0aa), 0, 0.45, -0.02, airUnit); box(0.86, 0.02, 0.5, std(0x9aa0aa), 0, 0.82, -0.02, airUnit); }
+    const airLamp = box(0.08, 0.05, 0.02, MAT.glow(0xff4a3a, 1.4), 0.3, 1.3, 0.31, airUnit);
+    const airScreen = makeScreen(0.34, 0.22, infoScreen('AIR UNIT', ['Offline'], { w: 256, hgt: 160 }), [256, 160]); airScreen.position.set(-0.05, 1.22, 0.31); airUnit.add(airScreen);
+    const airCol = player.addBox(-4.92, -4.28, -3.07, -2.13, 0, 1.5);
+    const cartridge = (dirty) => () => { const g = new THREE.Group(); cyl(0.09, 0.09, 0.3, std(dirty ? 0x6a5a48 : 0xf2f4f6, { roughness: dirty ? 1 : 0.4 }), 0, 0.15, 0, g, 16); cyl(0.092, 0.092, 0.05, std(dirty ? 0x3a3a30 : 0x2b6ad8), 0, 0.2, 0, g, 16); cyl(0.04, 0.04, 0.03, std(0x3a3f4a), 0, 0.315, 0, g, 10); return g; };
+    const asmAir = ASM.air = Object.assign(makeAssembly(ctx, {
+      key: 'asmAir', title: 'Air unit', chassis: airUnit, bench: [-2.7, -3.3, 0],
+      active: () => state.asmActive === 'air' && !state.built.includes('air'),
+      parts: [
+        { id: 'fan', name: 'Fan module', make: () => { const g = new THREE.Group(); box(0.5, 0.32, 0.1, std(0x3a3f4a), 0, 0.16, 0, g); const f = cyl(0.13, 0.13, 0.02, std(0x9aa3b2), 0, 0.16, 0.06, g, 18); f.rotation.x = Math.PI / 2; return g; }, slot: [0, 0.85, 0.12] },
+        { id: 'heater', name: 'Heater core', make: () => { const g = new THREE.Group(); box(0.6, 0.22, 0.28, std(0xc8502a, { roughness: 0.6 }), 0, 0.11, 0, g); for (let i = -2; i <= 2; i++) box(0.02, 0.2, 0.3, std(0x8a3a1a), i * 0.11, 0.11, 0, g); return g; }, slot: [0, 0.47, 0] },
+        { id: 'co2', name: 'CO₂ scrubber cartridge', make: cartridge(false), slot: [-0.2, 0.06, 0.02] },
+        { id: 'o2', name: 'O₂ sensor', make: () => { const g = new THREE.Group(); box(0.14, 0.12, 0.1, std(0xe8ebf0), 0, 0.06, 0, g); box(0.06, 0.03, 0.01, MAT.glow(0x5ad8ff, 1), 0, 0.08, 0.051, g); return g; }, slot: [0.24, 0.06, 0.05] }],
+      decoys: [{ id: 'old', name: 'Clogged old cartridge', why: 'It is saturated with CO₂ and dust: it would not clean the air.', make: cartridge(true) }],
+      onDone: () => { completeBuild(BUILD.find(b => b.id === 'air')); hud.flash('Air unit assembled: fans, heater, CO₂ scrubber and O₂ sensor all fitted.', 'good', 3500); }
+    }), { title: 'Air unit', parts: 4 });
+    const asmMarker = id => { const A = id === 'lights' ? asmLights : asmAir; const p = Object.keys(A.sockets).find(k => !A.sockets[k].userData.filled); if (!p) return null; return carry.held === A.items[p] ? A.sockets[p] : A.items[p]; };
+    const showAir = () => { const v = state.asmActive === 'air' || state.built.includes('air'); airUnit.visible = v; airCol.on = v; lightRig.visible = state.asmActive === 'lights' || state.built.includes('lights'); };
+
+    // ================= Life support activity (11A): service the air unit =================
+    // Fans off at the breaker -> take out the saturated CO2 cartridge -> bin it -> fit a new cartridge -> fans on.
+    // Failure states: opening the unit with the fans running, restarting with no cartridge, refitting the old one.
+    const LS = state.ls || (state.ls = {});
+    const lsActive = () => ctx.current()?.id === 'lifesupport';
+    let co2 = LS.done ? 800 : 3900;
+    const breaker = new THREE.Group(); box(0.08, 0.16, 0.06, std(0x1a1d24), 0, 0, 0, breaker); const lever = box(0.03, 0.08, 0.03, std(0xffc857), 0, 0.04, 0.04, breaker); breaker.position.set(0.49, 1.0, 0.18); breaker.rotation.y = Math.PI / 2; airUnit.add(breaker);
+    const brkHit = new THREE.Mesh(new THREE.BoxGeometry(0.25, 0.3, 0.25), new THREE.MeshBasicMaterial({ visible: false })); brkHit.userData.hitbox = true; breaker.add(brkHit);
+    const setLever = () => { lever.position.y = LS.fansOff ? -0.04 : 0.04; };
+    const bin = new THREE.Group(); cyl(0.2, 0.17, 0.5, std(0x3a5a3a, { roughness: 0.8 }), 0, 0.25, 0, bin, 18); const binLbl = box(0.2, 0.08, 0.01, std(0xf2f4f6), 0, 0.35, 0.2, bin); bin.position.set(-4.0, 0, -1.5); scene.add(bin); player.addBox(-4.22, -3.78, -1.72, -1.28, 0, 0.6);
+    const binSock = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.6, 0.45), new THREE.MeshBasicMaterial({ visible: false })); binSock.position.set(-4.0, 0.3, -1.5); binSock.userData.hitbox = true; scene.add(binSock);
+    const spare = cartridge(false)(); spare.position.set(-2.3, 0.905, -3.3); scene.add(spare); carry.makeCarriable(spare, { id: 'ls-new', name: 'New CO₂ cartridge', stow: false });
+    const slotAt = airUnit.localToWorld(new THREE.Vector3(-0.2, 0.06, 0.02));
+    const lsSock = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.4, 0.3), new THREE.MeshBasicMaterial({ visible: false })); lsSock.position.copy(slotAt).add(new THREE.Vector3(0, 0.17, 0)); lsSock.userData.hitbox = true; scene.add(lsSock);
+    const oldC = () => asmAir.items.co2; // the cartridge fitted during assembly is the one that gets saturated
+    function lsPrepare() { // make the fitted cartridge the "saturated" one that has to come out
+      const o = oldC(); if (!o || LS.binned) return;
+      o.userData.carry.id = 'ls-old'; o.userData.carry.name = 'Saturated CO₂ cartridge'; o.userData.it.label = 'Saturated CO₂ cartridge';
+      o.traverse(m => { if (m.isMesh && m.material.color) { m.material = m.material.clone(); m.material.color.multiplyScalar(0.55); } });
+      if (!LS.out) { o.userData.locked = false; }
+      const pick = o.userData.it.use; o.userData.it.use = () => { if (!LS.fansOff) { sfx.wrong(); if (!LS.warnFans) { LS.warnFans = true; ctx.mistake('Life support: tried to open the air unit with the fans running.'); } hud.flash('Stop! Switch the fans off at the breaker first: never open a running air unit.', 'bad', 4000); return; } pick(); };
+      o.userData.carry.onPick = () => { if (!LS.out) { LS.out = true; asmAir.sockets.co2.userData.ghost.visible = false; asmAir.sockets.co2.userData.filled = o; } drawAir(); };
+      o.userData.lsReady = true;
+    }
+    carry.makeSocket(binSock, { label: 'Waste bin', lock: true, accepts: it => /^ls-/.test(it.userData.carry.id), check: it => it.userData.carry.id === 'ls-old' ? { ok: true } : { ok: false, msg: 'That is the new cartridge: it goes into the air unit, not the bin.' }, onPlace: it => { it.visible = false; LS.binned = true; hud.flash('Old cartridge binned. Now fit the new one from the workbench.', 'good', 3000); drawAir(); } });
+    carry.makeSocket(lsSock, { label: 'Air unit: cartridge slot', lock: true, accepts: it => /^ls-/.test(it.userData.carry.id), check: it => !lsActive() ? { ok: false, msg: 'Not now.' } : it.userData.carry.id === 'ls-new' ? { ok: true } : { ok: false, msg: 'That is the saturated cartridge: it would not clean the air. Put it in the waste bin and fit the new one.' }, onPlace: it => { it.position.copy(slotAt); it.rotation.set(0, airUnit.rotation.y, 0); LS.newIn = true; hud.flash('New cartridge fitted. Switch the fans back on at the breaker.', 'good', 3000); drawAir(); } });
+    makeUsable(brkHit, { label: 'Air unit fan breaker', verb: () => LS.fansOff ? 'Switch fans ON' : 'Switch fans OFF', range: 2.4, enabled: () => lsActive() && !LS.done, use: () => {
+      sfx.click();
+      if (!LS.fansOff) { LS.fansOff = true; setLever(); sfx.hum(false); hud.flash('Fans off: the unit is safe to open. Take out the saturated CO₂ cartridge.', '', 3500); drawAir(); return; }
+      if (!LS.out) { sfx.wrong(); hud.flash('The saturated cartridge is still fitted: switching back on now would not clean the air. Swap the cartridge first.', 'bad', 4000); return; }
+      if (!LS.newIn) { sfx.alarm(); if (!LS.warnEmpty) { LS.warnEmpty = true; ctx.mistake('Life support: restarted the air unit with no CO₂ cartridge.'); } hud.flash('⚠ Alarm: no scrubber cartridge fitted! Without it, CO₂ would keep rising. The fans stay off: fit the new cartridge first.', 'bad', 5000); return; }
+      LS.fansOff = false; LS.done = true; setLever(); sfx.hum(true); airLamp.material.color.set(0x3fe0a0); airLamp.material.emissive.set(0x3fe0a0); drawAir();
+      hud.flash('Fans on. CO₂ is falling and O₂ is steady: life support is green.', 'good', 4000);
+    } }); brkHit.userData.it.verb = 'Switch the fans OFF/ON at'; ix.add(brkHit);
+    function drawAir() {
+      const lines = !state.built.includes('air') ? ['Offline'] : [[`CO₂ ${Math.round(co2)} ppm`, co2 > 2500 ? '#ff6a6a' : '#3fe0a0'], ['O₂ 20.9 %', '#3fe0a0'], LS.fansOff ? ['Fans: OFF', '#ffb347'] : ['Fans: ON', '#3fe0a0'], LS.done ? ['Cartridge: new ✓', '#3fe0a0'] : ['Cartridge: SATURATED', '#ff6a6a']];
+      airScreen.userData.screen.redraw(infoScreen('AIR UNIT', lines, { w: 256, hgt: 160 }));
+      if (lsActive()) hud.setReadout('Air unit service', [['CO₂', `${Math.round(co2)} ppm`, co2 > 2500 ? 'bad' : 'good'], ['1. Fans off', LS.fansOff || LS.done ? '✓' : '—', LS.fansOff || LS.done ? 'good' : ''], ['2. Old cartridge out', LS.out ? '✓' : '—', LS.out ? 'good' : ''], ['3. Old cartridge binned', LS.binned ? '✓' : '—', LS.binned ? 'good' : ''], ['4. New cartridge in', LS.newIn ? '✓' : '—', LS.newIn ? 'good' : ''], ['5. Fans on', LS.done ? '✓' : '—', LS.done ? 'good' : '']]);
+    }
+    let airT = 0;
+    function lsUpdate(dt, blocked) {
+      showAir();
+      const act = lsActive();
+      spare.visible = act || LS.newIn; spare.userData.locked = !act || LS.newIn && spare.userData.inSocket;
+      if (act && !oldC()?.userData.lsReady) lsPrepare();
+      if (blocked) return;
+      if (state.built.includes('air') && !LS.done && !LS.fansOff) co2 = Math.min(5200, co2 + dt * 6);
+      if (LS.done && co2 > 800) co2 = Math.max(800, co2 - dt * 600);
+      if ((airT -= dt) < 0) { airT = 0.5; if (state.built.includes('air')) drawAir(); }
+      if (act && LS.done && co2 <= 2500 && ctx.done('lifesupport')) { hud.setReadout(null); hud.flash('Life support serviced! Talk to Dr. Osei to choose your crops.', 'good', 4000); }
+    }
+    const lsMarker = () => !LS.fansOff && !LS.out ? brkHit : !LS.out ? oldC() : !LS.binned ? binSock : !LS.newIn ? (carry.held === spare ? lsSock : spare) : brkHit;
+    setLever();
+    if (LS.binned && oldC()) { oldC().visible = false; oldC().userData.locked = true; }
+    if (LS.newIn) { spare.position.copy(slotAt); spare.userData.locked = true; spare.userData.inSocket = lsSock; lsSock.userData.filled = spare; }
+    if (LS.done) { airLamp.material.color.set(0x3fe0a0); airLamp.material.emissive.set(0x3fe0a0); }
+
+    // ================= Greenhouse activity (11A): plant the seedlings and water the beds =================
+    const shelf = new THREE.Group(); box(0.9, 0.04, 0.5, std(0x8a6a48), 0, 0.7, 0, shelf); for (const sx of [-1, 1]) box(0.04, 0.7, 0.5, MAT.metal(0x6a707a), sx * 0.43, 0.35, 0, shelf); shelf.position.set(2.6, 0, 4.6); scene.add(shelf);
+    const shelfCol = player.addBox(2.13, 3.07, 4.33, 4.87, 0, 0.8); shelfCol.on = false; shelf.visible = false;
+    const trays = [], bedSocks = [], waterHits = [];
+    const can = new THREE.Group(); cyl(0.11, 0.13, 0.24, std(0x2e8a4a, { roughness: 0.5 }), 0, 0.12, 0, can, 16); const spout = cyl(0.015, 0.025, 0.3, std(0x2e8a4a), 0.17, 0.2, 0, can, 8); spout.rotation.z = -0.9; const handle = new THREE.Mesh(new THREE.TorusGeometry(0.08, 0.012, 6, 16, Math.PI), std(0x2e8a4a)); handle.position.y = 0.24; can.add(handle);
+    can.position.set(3.2, 0, -1.6); can.visible = false; scene.add(can);
+    let canMade = false;
+    const tankHit = new THREE.Mesh(new THREE.BoxGeometry(1.3, 1.6, 1.3), new THREE.MeshBasicMaterial({ visible: false })); tankHit.position.set(4.2, 0.8, -2.8); tankHit.userData.hitbox = true; scene.add(tankHit);
+    const plantingActive = () => ctx.isDone('lifesupport') && !ctx.isDone('plant') && state.crops.length && state.planting;
+    function setupPlanting() {
+      const P = state.planting || (state.planting = { trays: {}, watered: {}, can: 0 });
+      shelf.visible = true; shelfCol.on = true;
+      if (!trays.length) state.crops.forEach((c, i) => {
+        const t = new THREE.Group(); box(0.55, 0.06, 0.38, std(0x3a3f4a), 0, 0.03, 0, t); box(0.5, 0.03, 0.33, std(0x5a4a3a, { roughness: 1 }), 0, 0.065, 0, t);
+        for (let k = 0; k < 6; k++) { const sp = new THREE.Mesh(new THREE.ConeGeometry(0.03, 0.07, 5), std(0x5aaa3a)); sp.position.set(-0.16 + (k % 3) * 0.16, 0.11, k < 3 ? -0.08 : 0.08); t.add(sp); }
+        t.position.set(2.35 + i * 0.5, 0.72, 4.6); scene.add(t); carry.makeCarriable(t, { id: 'tray-' + i, name: `${CROPS[c].name} seedlings (tray)`, stow: false }); t.userData.crop = c; trays.push(t);
+      });
+      if (!canMade) { canMade = true; can.visible = true; carry.makeCarriable(can, { id: 'can', name: 'Watering can', stow: false, hold: { rot: [0, 0, 0] } }); }
+      if (!bedSocks.length) [-1.3, 1.3].forEach((x, bi) => {
+        const s = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.5, 1.4), new THREE.MeshBasicMaterial({ visible: false })); s.position.set(x, 0.75, 0); s.userData.hitbox = true; scene.add(s);
+        carry.makeSocket(s, { label: `Bed ${bi ? 'B (right)' : 'A (left)'}`, lock: true, accepts: it => /^tray-/.test(it.userData.carry.id), check: () => P.trays[bi] ? { ok: false, msg: 'This bed already has a tray. Use the other bed.' } : { ok: true },
+          onPlace: it => { it.position.set(x, 0.53, 0); it.rotation.set(0, 0, 0); P.trays[bi] = it.userData.crop; hud.flash(`${CROPS[it.userData.crop].name} planted in bed ${bi ? 'B' : 'A'}.`, 'good', 2500); checkPlanting(); } });
+        bedSocks.push(s);
+        const w = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.5, 4.0), new THREE.MeshBasicMaterial({ visible: false })); w.position.set(x, 0.75, 0); w.userData.hitbox = true; scene.add(w);
+        makeUsable(w, { label: `Bed ${bi ? 'B' : 'A'}`, verb: 'Water', range: 2.4, enabled: () => plantingActive() && carry.held === can && P.trays[bi] != null, use: () => {
+          if (P.can <= 0) { sfx.wrong(); hud.flash('The can is empty. Fill it at the water tank.', '', 2500); return; }
+          if (P.watered[bi]) { sfx.wrong(); ctx.mistake('Greenhouse: overwatered a bed.'); hud.flash('Overwatered! Roots need air as well as water. The extra drains back to the recycler, but don\'t water the same bed twice.', 'bad', 4500); P.can--; return; }
+          P.can--; P.watered[bi] = true; sfx.pour(); hud.cap('[Splish: water soaks into the bed]', 1500); hud.flash(`Bed ${bi ? 'B' : 'A'} watered.`, 'good', 2000); checkPlanting();
+        } }); ix.add(w); waterHits.push(w);
+      });
+      // restore trays already in beds
+      Object.entries(P.trays).forEach(([bi, c]) => { const t = trays.find(x => x.userData.crop === c); if (t) { t.position.set(bi == 1 ? 1.3 : -1.3, 0.53, 0); t.userData.locked = true; t.userData.inSocket = bedSocks[bi]; bedSocks[bi].userData.filled = t; } });
+    }
+    makeUsable(tankHit, { label: 'Water tank', verb: 'Fill the watering can at the', range: 2.4, enabled: () => plantingActive() && carry.held === can, use: () => { state.planting.can = 2; sfx.pour(); hud.cap('[Glug glug: the can fills up]', 1500); hud.flash('Can filled: enough for both beds.', '', 2000); } }); ix.add(tankHit);
+    function checkPlanting() {
+      const P = state.planting; if (!(P.trays[0] != null && P.trays[1] != null && P.watered[0] && P.watered[1])) return;
+      if (carry.held === can) { carry.held = null; }
+      can.visible = false; can.userData.locked = true; trays.forEach(t => { t.visible = false; t.userData.locked = true; }); shelf.visible = false; shelfCol.on = false;
+      makePlants(); ctx.done('plant'); sfx.good(); hud.flash('Planted and watered! Mission GREENHOUSE-01 has started. Open the control panel and set it up for both crops.', 'good', 5000);
+    }
+    const plantMarker = () => { if (!ctx.isDone('lifesupport')) return null; if (!state.crops.length) return osei.rig.root; const P = state.planting || {}; const t = trays.find(x => !x.userData.inSocket); if (t) return carry.held === t ? bedSocks.find((s, i) => P.trays[i] == null) : t; if (carry.held !== can) return can; if (P.can <= 0) return tankHit; return waterHits.find((w, i) => !P.watered[i]) || null; };
+    // airlock: the outer door slides open when you come close
+    function doorUpdate(dt) { const d = built.airlock?.userData.door; if (!d) return; const near = Math.hypot(player.pos.x, player.pos.z - 7.5) < 2.4; d.position.x += ((near ? 1.1 : 0) - d.position.x) * Math.min(1, dt * 4); }
     // plants
     const plantG = new THREE.Group(); scene.add(plantG); let plantMeshes = [];
     function makePlants() {
       plantG.clear(); plantMeshes = [];
-      state.crops.forEach((c, bi) => { const x = bi ? 1.3 : -1.3; for (let k = 0; k < 10; k++) { const p = new THREE.Group(); const stem = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.3, 6), std(0x4a9a3a)); stem.position.y = 0.15; p.add(stem); const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), std(CROPS[c].col)); fruit.position.set(0.05, 0.22, 0.04); fruit.visible = false; p.add(fruit); p.position.set(x + (k % 2 ? 0.25 : -0.25), 0.53, -1.8 + Math.floor(k / 2) * 0.9); plantG.add(p); plantMeshes.push({ p, c, stem, fruit }); } });
+      state.crops.forEach((c, bi) => { const x = bi ? 1.3 : -1.3; for (let k = 0; k < 10; k++) { const p = new THREE.Group(); const stem = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.3, 6), std(0x4a9a3a)); stem.position.y = 0.15; p.add(stem); const fruit = new THREE.Mesh(new THREE.SphereGeometry(0.06, 8, 6), std(CROPS[c].col)); fruit.position.set(0.05, 0.22, 0.04); fruit.visible = false; p.add(fruit); p.position.set(x + (k % 2 ? 0.25 : -0.25), 0.53, -1.8 + Math.floor(k / 2) * 0.9); plantG.add(p); plantMeshes.push({ p, c, stem, fruit }); cropModel(p, c, stem, fruit, k); } });
+    }
+    // imported crop models (lettuce, dwarf wheat, tomato, potato plants with potatoes at harvest); the cone/ball stay as fallback
+    const CROP_MODELS = { lettuce: ['lettuce', 0.4, 'length'], wheat: ['wheat', 0.7, 'height'], tomato: ['tomato', 0.65, 'height'], potato: ['potatoplants', 0.8, 'length'] };
+    function cropModel(p, c, stem, fruit, k) {
+      const def = CROP_MODELS[c]; if (!def) return;
+      whenModel(def[0], gltf => {
+        if (!p.parent) return;
+        const h = markImported(fit(instance(gltf), { size: def[1], by: def[2], rotY: k * 1.3 })); p.add(h);
+        stem.material = stem.material.clone(); stem.material.visible = false; // keeps the health colour logic harmless
+        fruit.material = fruit.material.clone(); fruit.material.visible = false;
+        if (c === 'potato') whenModel('potato', g2 => { for (const [dx, dz] of [[0.08, 0.06], [-0.07, 0.02], [0.01, -0.08]]) { const t = markImported(fit(instance(g2), { size: 0.09, by: 'max' })); t.position.set(dx, -0.2, dz); fruit.add(t); } });
+      });
     }
     // ---- instructor
     const osei = instructor(ctx, LOOKS.botanist, 'Dr. Osei', [-6.5, -5.5, 0.6], () => talkOsei());
@@ -140,7 +321,9 @@ export default {
         { id: 'soil', who: 'Dr. Osei', text: 'Good question. Lunar regolith is cheap because it\'s already here, but raw, it\'s crushed rock and glass with no nutrients. It needs processing first.', goto: 'go' },
         { id: 'faults', who: 'Dr. Osei', text: 'Something always does. Pumps fail, filters clog, and dust can cut your solar power. The control panel shows every reading. Watch it.', goto: 'go' },
         { id: 'go', who: 'Dr. Osei', text: 'Order your parts, then build step by step at the glowing markers.', do: () => { if (ctx.done('brief')) T.start(); } }];
-      if (ctx.isDone('build') && !ctx.isDone('plant')) return [{ who: 'Dr. Osei', text: 'Beautiful work. Now choose two crops. Each one likes different conditions, so you\'ll need settings that suit both.', do: () => setTimeout(plant, 50) }];
+      if (ctx.isDone('build') && !ctx.isDone('lifesupport')) return [{ who: 'Dr. Osei', text: 'Beautiful work. One thing first: the air unit\'s CO₂ cartridge was saturated during the pressure test. Switch the fans off at its breaker, take the old cartridge out, bin it, fit a new one from the bench and switch the fans back on.' }];
+      if (ctx.isDone('lifesupport') && !ctx.isDone('plant') && state.crops.length) return [{ who: 'Dr. Osei', text: 'Carry each seedling tray to its own bed, then fill the watering can at the water tank and water both beds. Not too much!' }];
+      if (ctx.isDone('lifesupport') && !ctx.isDone('plant')) return [{ who: 'Dr. Osei', text: 'Beautiful work. Now choose two crops. Each one likes different conditions, so you\'ll need settings that suit both.', do: () => setTimeout(plant, 50) }];
       const cur = ctx.current()?.id;
       const tip = { store: 'Every ★ part is required. Pick one kind of light and one kind of growing bed.', build: `Next: ${nextBuild()?.name}.`, grow: 'Keep checking the control panel. Each crop shows its ideal range and what is bothering it.', harvest: 'Harvest from the beds when they say Ready.', report: 'File your report on the control panel.' }[cur];
       return [{ who: 'Dr. Osei', text: tip || 'Good work.' }];
@@ -159,8 +342,8 @@ export default {
       const maxD = Math.max(...chosen.map(c => CROPS[c].days));
       state.plan = pool.map((f, i) => [f, Math.round(maxD * (0.15 + i * 0.6 / pool.length))]);
       if (ctx.diff.faults === 'linked' && pool.includes('pump') && !pool.includes('filter')) state.plan.push(['filter', state.plan.find(p => p[0] === 'pump')[1] + 2]);
-      makePlants(); ctx.done('plant'); sfx.good();
-      hud.flash('Planted! Mission GREENHOUSE-01 has started. Open the control panel and set it up for both crops.', 'good', 5000);
+      state.planting = { trays: {}, watered: {}, can: 0 }; setupPlanting(); sfx.good();
+      hud.flash('Crops chosen. Carry each seedling tray (by the airlock) to a growing bed, then water both beds with the watering can.', '', 6000);
     }
     // ---- mission simulation
     const maxDays = () => Math.max(...state.crops.map(c => CROPS[c].days));
@@ -226,16 +409,16 @@ export default {
     state.built.forEach(id => { showPiece(id); markers[id].visible = false; });
     if (state.built.length) ctx.steps.find(s => s.id === 'build').text = `Build the greenhouse: ${state.built.length} of 11 steps`;
     if (ctx.isDone('build')) controlScreen.visible = true;
-    if (state.crops.length) makePlants();
+    if (state.crops.length && ctx.isDone('plant')) makePlants(); else if (state.crops.length) setupPlanting();
     if (ctx.isDone('brief')) T.start();
     drawPallets();
 
     return {
       spawn: [-8, -4, -Math.PI * 0.75, 0],
-      markerFor: id => ({ brief: osei.rig.root, store: term, build: markers[nextBuild()?.id] || null, plant: osei.rig.root, grow: controlScreen, harvest: bedHit, report: controlScreen }[id] || null),
+      markerFor: id => ({ brief: osei.rig.root, store: term, build: state.asmActive ? asmMarker(state.asmActive) : markers[nextBuild()?.id] || null, lifesupport: lsMarker(), plant: plantMarker(), grow: controlScreen, harvest: bedHit, report: controlScreen }[id] || null),
       onEnter: () => { if (!ctx.isDone('brief')) hud.flash('Talk to Dr. Osei to begin.', '', 3500); },
       update(dt, blocked) {
-        osei.update(dt); T.update(dt, blocked && !panelOpen);
+        osei.update(dt); T.update(dt, blocked && !panelOpen); asmLights.update(dt); asmAir.update(dt); lsUpdate(dt, blocked); doorUpdate(dt);
         if (ctx.isDone('plant') && !ctx.isDone('harvest') && (!blocked || panelOpen)) sim(dt);
         if (state.sys) { drawPlants(); screenT -= dt; if (screenT < 0) { screenT = 0.6; const S = state.sys, open = Object.keys(S.faults).filter(f => !S.fixed[f]); controlScreen.userData.screen.redraw(infoScreen('GREENHOUSE CONTROL', [`Day ${Math.floor(state.day)} · ${state.crops.map(c => CROPS[c].icon + ' ' + STAGES[stageOf(c)]).join('  ')}`, `${S.temp.toFixed(0)} °C · ${S.hum.toFixed(0)}% · water ${S.water.toFixed(0)} L`, open.length ? [`⚠ ${FAULTS[open[0]].name}`, '#ff6a6a'] : ['All systems normal', '#3fe0a0']], { w: 512, hgt: 320 })); }
           if (!blocked && ctx.isDone('plant') && !ctx.isDone('harvest')) hud.setReadout('GREENHOUSE-01', [['Day', Math.floor(state.day), ''], ...state.crops.map(c => [CROPS[c].name, STAGES[stageOf(c)], cropHealth(c, state.sys, link).health > 0.7 ? 'good' : 'warn']), ['Faults', Object.keys(state.sys.faults).filter(f => !state.sys.fixed[f]).length || 'none', Object.keys(state.sys.faults).some(f => !state.sys.fixed[f]) ? 'bad' : 'good']]);

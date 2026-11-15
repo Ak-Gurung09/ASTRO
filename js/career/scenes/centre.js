@@ -16,6 +16,7 @@ import { nextModule } from '../data/modules.js';
 import { career } from '../state/careerSave.js';
 import { h, openModal } from '../../ui/dom.js';
 import { save } from '../../systems/core.js';
+import { whenModel, instance, fit, markImported } from '../../assets/models.js';
 
 const X0 = -12, X1 = 12, Z0 = -16, Z1 = 4, HT = 4.2;
 const RULES = [
@@ -84,6 +85,8 @@ export default {
     { const d = makeSlidingDoor(1.4, 2.4, 'LAB'); d.position.set(X0 + 0.09, 0, 1.5); d.rotation.y = Math.PI / 2; scene.add(d); const s = makeSign('LIFE SCIENCES', 'Greenhouse · medical', 1.4); s.position.set(X0 + 0.02, 3.0, 1.5); s.rotation.y = Math.PI / 2; scene.add(s); }
     for (const [x, z] of [[-11.3, 3.3], [11.3, 3.3], [-11.3, -9.3], [3.5, -9.3]]) { const p = H.makePlant(1.6); p.position.set(x, 0, z); scene.add(p); player.addBox(x - 0.3, x + 0.3, z - 0.3, z + 0.3, 0, 1.2); }
     const sat = makeSatelliteModel(); sat.position.set(3, 3.3, -5); scene.add(sat);
+    // notice board (imported model; its pinned side faces -x in the file) on the back wall of the lobby
+    whenModel('bulletin', gltf => { const nb = markImported(fit(instance(gltf), { size: 1.6, by: 'x', rotY: Math.PI / 2, ground: false })); nb.position.set(7.2, 1.55, -9.9); scene.add(nb); });
     const benches = makeChairRow(4, 0x3a5a8a); benches.position.set(-8, 0, 3.3); benches.rotation.y = Math.PI; scene.add(benches); player.addBox(-9.3, -6.7, 3, 3.6, 0, 1);
 
     // ---------- people ----------

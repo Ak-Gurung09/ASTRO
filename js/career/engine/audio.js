@@ -123,5 +123,14 @@ export const sfx = {
   horn() { const a = buses(); if (a) { blip(a, 392, 0.35, 'sawtooth', 0.03); blip(a, 494, 0.35, 'sawtooth', 0.025); } },
   carDoor() { const a = buses(); if (a) { thud(a, 0.4, 220, 0.2); blip(a, 90, 0.15, 'sine', 0.05); } },
   knock() { const a = buses(); if (a) for (let i = 0; i < 3; i++) setTimeout(() => thud(a, 0.4, 500, 0.08), i * 180); },
+  // Short burst of high hiss (extinguisher spray, steam, air). Call repeatedly while it lasts.
+  spray() { const a = buses(); if (a) { const src = a.createBufferSource(); src.buffer = noise(a); const f = a.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = 1800; const g = a.createGain(), t = a.currentTime; g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.09, t + 0.03); g.gain.linearRampToValueAtTime(0.0001, t + 0.2); src.connect(f).connect(g).connect(sfxBus); src.start(t, Math.random()); src.stop(t + 0.22); } },
+  pour() { const a = buses(); if (a) for (let i = 0; i < 6; i++) blip(a, 300 + Math.random() * 500, 0.06, 'sine', 0.025, a.currentTime + i * 0.07, 200 + Math.random() * 300); },
+  gulp() { const a = buses(); if (a) for (let i = 0; i < 3; i++) { thud(a, 0.25, 260, 0.1); blip(a, 180, 0.08, 'sine', 0.05, a.currentTime + i * 0.28, 120); } },
+  click() { const a = buses(); if (a) { thud(a, 0.2, 2000, 0.03); blip(a, 1400, 0.03, 'square', 0.02); } },
+  hum(on = true) { const a = buses(); if (a) blip(a, on ? 110 : 220, 0.4, 'sawtooth', 0.025, a.currentTime, on ? 220 : 90); },
+  // Loud, harsh noise (migraine-trigger demo): band-passed noise plus a grinding tone, capped well below the master volume.
+  loud(d = 2.5) { const a = buses(); if (!a) return; const t = a.currentTime, src = a.createBufferSource(); src.buffer = noise(a); src.loop = true; const f = a.createBiquadFilter(); f.type = 'bandpass'; f.frequency.value = 1400; f.Q.value = 0.7; const g = a.createGain(); g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.16, t + 0.25); g.gain.setValueAtTime(0.16, t + d - 0.3); g.gain.linearRampToValueAtTime(0.0001, t + d); src.connect(f).connect(g).connect(sfxBus); src.start(t); src.stop(t + d + 0.05); blip(a, 140, d, 'sawtooth', 0.05, t, 180); },
+  cough() { const a = buses(); if (a) for (let i = 0; i < 2; i++) setTimeout(() => thud(a, 0.3, 900, 0.14), i * 260); },
   alarm() { const a = buses(); if (a) for (let i = 0; i < 3; i++) blip(a, 880, 0.18, 'square', 0.04, a.currentTime + i * 0.3, 660); }
 };

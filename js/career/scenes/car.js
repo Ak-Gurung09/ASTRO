@@ -8,7 +8,7 @@ import { LOOKS } from '../data/people.js';
 import { setAmbienceRate } from '../engine/audio.js';
 
 const STOP = 1500;                         // metres to the training centre car park
-const EYE = new THREE.Vector3(0.42, 1.24, 0.86); // rear right seat
+const EYE = new THREE.Vector3(0.0, 1.24, 0.86); // rear seat, middle (sees the road between the front seats)
 const ROAD_X = -1.8;                       // the car drives in the right-hand lane
 
 export default {
@@ -97,7 +97,7 @@ export default {
         { who: 'Cat', text: 'Look, {name}! There it is, on the right. The Astronaut Training Centre.' },
         { who: 'Bug', text: 'And would you look at that rocket out front. Big day.' }] }
     ];
-    let talkingNow = null;
+    let talkingNow = null, doorOpen = false;
     async function runTalk(tk) { talkingNow = tk.id; state.talked[tk.id] = true; await ctx.talk(tk.script); talkingNow = null; }
     function arrive() {
       if (stopped && ctx.isDone('ride')) return; stopped = true; ctx.done('ride');
@@ -112,7 +112,10 @@ export default {
       markerFor: () => null,
       onEnter: () => { if (!stopped) hud.flash(ctx.input.touch ? 'Drag to look out of the windows.' : 'Move the mouse to look out of the windows. Press L to read your letter again.', '', 4500); },
       defaultPrompt: () => ctx.isDone('ride') && !ctx.isDone('exit') ? { verb: 'Open', label: 'the car door' } : null,
-      onUse: () => { if (ctx.isDone('ride') && !ctx.isDone('exit')) { sfx.carDoor(); ctx.done('exit'); setTimeout(() => ctx.goto('arrival'), 500); } },
+      onUse: () => { if (ctx.isDone('ride') && !ctx.isDone('exit')) { sfx.carDoor(); ctx.done('exit'); doorOpen = true; setTimeout(() => ctx.goto('arrival'), 900); } },
+      // The drive is a ride: it can be skipped to the car park (conversations on the way are optional chat)
+      cinematic: () => !stopped && !ctx.dlg.active,
+      skipCinematic: () => { if (stopped) return; for (const tk of talks) state.talked[tk.id] = true; d = STOP; v = 0; arrive(); },
       saveState: st => { st.d = Math.round(d); },
       update(dt, blocked) {
         t += dt; const frozen = blocked && !ctx.dlg.active; // paused or reading the letter: the car waits
@@ -133,6 +136,8 @@ export default {
         for (const c of traffic) if (c.userData.z != null) { c.userData.z += (v + 18) * k; c.position.z = c.userData.z; c.visible = c.userData.z < 40; if (c.userData.z > 40) c.userData.z = null; } else c.visible = false;
         // car motion: wheels, a little body sway, the steering wheel and Bug's hands
         car.userData.wheels.forEach(w => w.rotation.x -= v * k / 0.33);
+        car.userData.steerWheels.forEach(w => { w.rotation.y = Math.sin(t * 0.6) * 0.03; });
+        const rd = car.userData.doors.find(o => o.side === 1 && !o.front); if (rd) { rd.open += ((doorOpen ? 1 : 0) - rd.open) * Math.min(1, dt * 5); rd.g.rotation.y = rd.open * 1.1; }
         const sway = stopped ? 0 : Math.sin(t * 1.3) * 0.004 + Math.sin(t * 7.1) * 0.0015 * (v / 20);
         car.position.y = sway; car.rotation.z = Math.sin(t * 0.7) * 0.004 * (v / 20);
         player.seat.pos.copy(EYE).add(car.position);

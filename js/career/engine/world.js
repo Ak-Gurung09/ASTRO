@@ -27,6 +27,12 @@ export class World {
     this.scene = new THREE.Scene();
     this.camera = new THREE.PerspectiveCamera(70, 1, 0.05, 400); this.camera.rotation.order = 'YXZ';
     this.scene.add(this.camera);
+    // First-person layer (hands and the held item): drawn after the world with a cleared depth buffer,
+    // so it can never clip into walls or props (see engine/layers.js and docs/RENDER-LAYERS.md).
+    this.fpScene = new THREE.Scene(); this.fpRoot = new THREE.Group(); this.fpScene.add(this.fpRoot);
+    this.fpScene.add(new THREE.HemisphereLight(0xf4f6ff, 0x50545e, 1.6));
+    const fpKey = new THREE.DirectionalLight(0xffffff, 1.6); fpKey.position.set(0.4, 1, 0.6); this.fpRoot.add(fpKey); this.fpRoot.add(fpKey.target); fpKey.target.position.set(0, 0, -1);
+    r.autoClear = false;
     this.resize(); this._onResize = () => this.resize(); addEventListener('resize', this._onResize);
     this.updaters = new Set(); this.running = false; this.fpsT = 0; this.fpsN = 0; this.autoDropped = false;
     this._onQ = s => { if (s.quality !== this._lastQ) { this._lastQ = s.quality; this.applyQuality(); } }; this._lastQ = settings.quality;
@@ -53,11 +59,19 @@ export class World {
       this.raf = requestAnimationFrame(loop);
       const dt = Math.min(0.05, (now - this.last) / 1000); this.last = now;
       for (const fn of this.updaters) { try { fn(dt); } catch (e) { console.error('[career]', e); } }
-      this.renderer.render(this.scene, this.camera);
+      this.render();
       this.watchFps(dt);
     };
     this.raf = requestAnimationFrame(loop);
   }
+  render() {
+    const r = this.renderer; r.clear();
+    r.render(this.scene, this.camera);
+    if (this.fpVisible()) { this.syncFP(); r.clearDepth(); r.render(this.fpScene, this.camera); }
+  }
+  // The first-person root follows the camera exactly
+  syncFP() { this.camera.updateMatrixWorld(); this.fpRoot.matrixAutoUpdate = false; this.fpRoot.matrix.copy(this.camera.matrixWorld); this.fpRoot.updateMatrixWorld(true); }
+  fpVisible() { let v = false; this.fpRoot.traverseVisible(o => { if (o.isMesh) v = true; }); return v; }
   // Auto quality: if the frame rate stays under 40 fps for 4 s, drop one tier (only when quality is Auto)
   watchFps(dt) {
     if (settings.quality !== 'auto' || this.autoDropped) return;
@@ -67,7 +81,7 @@ export class World {
   stop() { this.running = false; cancelAnimationFrame(this.raf); }
   dispose() {
     this.disposed = true; this.stop(); this._offQ?.(); removeEventListener('resize', this._onResize);
-    this.scene.traverse(o => { o.geometry?.dispose?.(); [].concat(o.material || []).forEach(m => { for (const k in m) if (m[k]?.isTexture) m[k].dispose(); m.dispose?.(); }); });
+    [this.scene, this.fpScene].forEach(sc => sc.traverse(o => { o.geometry?.dispose?.(); [].concat(o.material || []).forEach(m => { for (const k in m) if (m[k]?.isTexture) m[k].dispose(); m.dispose?.(); }); }));
     this.renderer.dispose(); this.renderer.forceContextLoss?.(); this.renderer.domElement.remove();
   }
 }
