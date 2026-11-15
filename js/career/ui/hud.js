@@ -2,7 +2,7 @@
 import { h, esc } from '../../ui/dom.js';
 import { settings } from '../../systems/core.js';
 
-const KEY_LABEL = { kbm: { use: 'E', drop: 'G', rotate: 'R', crouch: 'C' }, pad: { use: 'Ⓐ', drop: 'Ⓨ', rotate: 'Ⓧ', crouch: 'L3' }, touch: { use: '✋', drop: '⤓', rotate: '⟳', crouch: '⤵' } };
+const KEY_LABEL = { kbm: { use: 'E', drop: 'G', rotate: 'R', crouch: 'C', throw: 'T', inventory: 'I', skip: 'X', spray: 'F / left mouse' }, pad: { use: 'Ⓐ', drop: 'Ⓨ', rotate: 'Ⓧ', crouch: 'L3', throw: 'RB', inventory: 'LB', skip: 'Ⓑ', spray: 'RT' }, touch: { use: '✋', drop: '⤓', rotate: '⟳', crouch: '⤵', throw: '↗', inventory: '🎒', skip: '⏭', spray: '💨' } };
 export function keyFor(action, device) { return (KEY_LABEL[device] || KEY_LABEL.kbm)[action] || action; }
 
 export class CareerHUD {
@@ -27,10 +27,16 @@ export class CareerHUD {
       h('b', {}, title),
       h('ol', {}, steps.map((s, i) => h('li', { class: s.done ? 'done' : i === current ? 'cur' : '' }, s.done ? '✓ ' : i === current ? '▶ ' : '', (this.touch && s.touch) || s.text))));
   }
-  showPrompt(it, device) {
+  showPrompt(it, device, holding = false) {
+    if (!it && holding) { // carrying something and not aiming at a socket: show what you can do with it
+      this.cross.classList.remove('on'); const k = a => esc(keyFor(a, device));
+      const html = `<kbd>${k('drop')}</kbd> Put down <kbd>${k('throw')}</kbd> Throw <kbd>${k('rotate')}</kbd> Turn <kbd>${k('inventory')}</kbd> Backpack`;
+      if (this.prompt.innerHTML !== html) this.prompt.innerHTML = html; this.prompt.hidden = false; this.prompt.classList.add('hold'); return;
+    }
+    this.prompt.classList.remove('hold');
     if (!it) { this.prompt.hidden = true; this.cross.classList.remove('on'); return; }
     this.cross.classList.add('on');
-    const key = keyFor('use', device);
+    const key = it.key ? (typeof it.key === 'string' ? it.key : keyFor(it.key.action, device)) : keyFor('use', device);
     const html = `<kbd>${esc(key)}</kbd> ${esc(it.verb)} <b>${esc(it.label || '')}</b>`;
     if (this.prompt.innerHTML !== html) this.prompt.innerHTML = html;
     this.prompt.hidden = false;
@@ -56,6 +62,11 @@ export class CareerHUD {
     if (!title) { this.readEl.hidden = true; return; }
     this.readEl.hidden = false; const html = `<b>${esc(title)}</b>` + rows.map(([l, v, c]) => `<div class="${c || ''}"><span>${esc(l)}</span><em>${esc(String(v))}</em></div>`).join('');
     if (this.readEl.innerHTML !== html) this.readEl.innerHTML = html;
+  }
+  // A "Skip ⏭" button for cinematic moments (rides, intros). fn = null hides it.
+  setSkip(fn) {
+    if (!this.skipEl) { this.skipEl = h('button', { class: 'cx-skipcine tbtn', hidden: true, 'aria-label': 'Skip (X)', title: 'Skip (X / gamepad B)', onclick: () => this._skipFn?.() }, 'Skip ⏭'); this.root.append(this.skipEl); }
+    this._skipFn = fn; const show = !!fn; if (this.skipEl.hidden === show) this.skipEl.hidden = !show;
   }
   setLockHint(show) { this.lockHint.hidden = !show; }
   hideAll(hidden) { this.root.classList.toggle('cx-cinema', hidden); }

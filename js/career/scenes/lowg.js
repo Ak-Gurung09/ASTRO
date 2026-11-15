@@ -7,10 +7,13 @@ import { std, box, cyl } from '../models/house.js';
 import { Floater } from '../engine/float.js';
 import { trainingRoom, timer, finishExercise } from './kit.js';
 
+// Handrails along the course. Each one is anchored to the nearest module surface by standoff posts (float.js addRail).
+// Rail 3 used to hang across the middle of the module with nothing holding it: it is now a floor rail on two posts,
+// on the same line of travel from ring 2 to ring 3, so the route and the timing are unchanged.
 const RAILS = [
   [[-1.55, 1.3, 7.4], [-1.55, 1.3, 6.4]],
   [[1.55, 2.0, 2.9], [1.55, 2.0, 1.9]],
-  [[-0.5, 0.3, -1.2], [0.5, 0.3, -1.2]],
+  [[-0.5, 0.32, -1.2], [0.5, 0.32, -1.2], [0, -1, 0]],
   [[-1.55, 2.3, -4.4], [-1.55, 2.3, -5.4]],
   [[-0.55, 1.6, -8.25], [0.55, 1.6, -8.25]]
 ];
@@ -36,7 +39,9 @@ export default {
     const T = timer(ctx, 240);
     const F = new Floater(ctx, { bounds: [-1.7, 1.7, 0, 3.4, -8.5, 8.5], start: [-1.0, 1.4, 6.9], yaw: 0, bumpLimit: 1.1 * ctx.diff.tolerance,
       onBump: v => ctx.mistake(`Hit the module wall at ${v.toFixed(1)} m/s.`) });
-    const rails = RAILS.map(([a, b], i) => F.addRail(a, b, { label: i === RAILS.length - 1 ? 'Hatch handrail' : 'Handrail' }));
+    const rails = RAILS.map(([a, b, mount], i) => F.addRail(a, b, { label: i === RAILS.length - 1 ? 'Hatch handrail' : `Handrail ${i + 1}`, mount }));
+    // a floor plate under rail 3 so its anchor point reads clearly
+    box(1.3, 0.02, 0.22, MAT.metal(0x8a90a0), 0, 0.012, -1.2, scene);
     F.grab(F.rails[0]);
     const rings = RINGS.map((p, i) => {
       const g = new THREE.Group(); const t = new THREE.Mesh(new THREE.TorusGeometry(0.55, 0.035, 10, 40), MAT.glow(0xffc857, 0.6)); g.add(t);

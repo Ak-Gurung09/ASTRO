@@ -1,5 +1,7 @@
 // ASTRO LAB Career — stylised-realistic people built from smooth procedural shapes, with idle, look-at, talk, wave, give and sit poses.
 import * as THREE from '../../../vendor/three.module.js';
+import { whenModel, instance, fit, markImported, makeRetarget, PERSON_MODELS } from '../../assets/models.js';
+import { LOOKS } from '../data/people.js';
 
 const std = (color, o = {}) => new THREE.MeshStandardMaterial(Object.assign({ color, roughness: 0.75 }, o));
 const lathe = (pts, seg = 28) => new THREE.LatheGeometry(pts.map(([r, y]) => new THREE.Vector2(r, y)), seg);
@@ -110,9 +112,68 @@ export function makePerson(look = {}) {
   }
   root.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
   head.traverse(o => { if (o.isMesh) { o.castShadow = false; o.receiveShadow = false; } }); // small face parts look blotchy with self-shadowing
-  const rig = { root, body, spine, neck, head, legs, arms, eyes, lids, mouth, lower, t: Math.random() * 10, talk: 0, wave: 0, give: 0, giveTarget: 0, sit: 0, sitTarget: 0, lookTarget: null, hold: null };
+  const rig = { root, body, spine, neck, head, legs, arms, eyes, lids, mouth, lower, t: Math.random() * 10, talk: 0, wave: 0, give: 0, giveTarget: 0, sit: 0, sitTarget: 0, lookTarget: null, hold: null,
+    walk: 0, walkTarget: 0, walkPh: 0, ground: 0, groundTarget: 0, mask: null, cough: 0, holdHead: 0, holdHeadTarget: 0 };
   root.userData.rig = rig;
+  rig.procMeshes = []; root.traverse(o => { if (o.isMesh) rig.procMeshes.push(o); });
+  const name = look.model || Object.keys(LOOKS).find(k => LOOKS[k] === look);
+  if (PERSON_MODELS[name]) attachPersonModel(rig, PERSON_MODELS[name], L.height);
   return rig;
+}
+
+// Swap in an imported person model once it has loaded. Rigged models are driven by this rig's joints every frame
+// (so sitting, walking, waving and giving still work); static models just stand in place and turn a little to look.
+function attachPersonModel(rig, key, height) {
+  whenModel(key, gltf => {
+    if (rig.model) return;
+    const obj = instance(gltf);
+    const holder = markImported(fit(obj, { size: height, by: 'height' }));
+    rig.root.add(holder); rig.root.updateMatrixWorld(true);
+    const R = rig.arms.find(a => a.side === 1), Lf = rig.arms.find(a => a.side === -1), LR = rig.legs.find(l => l.side === 1), LL = rig.legs.find(l => l.side === -1);
+    const segs = { hips: rig.spine, neck: rig.neck, head: rig.head, upperArmL: R.sh, foreArmL: R.el, handL: R.wrist, upperArmR: Lf.sh, foreArmR: Lf.el, handR: Lf.wrist, thighL: LR.hip, calfL: LR.knee, thighR: LL.hip, calfR: LL.knee };
+    let rt = null;
+    let skinned = false; obj.traverse(o => { if (o.isSkinnedMesh) skinned = true; });
+    if (skinned) {
+      // measure against the standing rest pose (the rig may already be sitting when the model arrives)
+      const saved = rig.root.userData.restSnapshot = snapshotRest(rig);
+      rt = makeRetarget(obj, rig.root, segs);
+      restoreSnapshot(saved);
+    }
+    for (const m of rig.procMeshes) m.visible = false;
+    rig.model = { holder, obj, rt, wristBase: rig.arms.map(a => a.wrist.position.clone()), headBase: rig.head.position.clone() };
+  });
+}
+// set every joint to its rest rotation for a moment (returns what to restore)
+function snapshotRest(rig) {
+  const saved = [];
+  rig.root.traverse(o => { if ((o.isGroup || o.type === 'Object3D') && !o.userData.importedPart) { saved.push([o, o.quaternion.clone(), o.position.clone()]); } });
+  const keep = new Set([rig.root]);
+  for (const [o] of saved) if (!keep.has(o)) o.rotation.set(0, 0, 0);
+  rig.spine.position.y = 0.95; rig.legs.forEach(l => { l.hip.position.y = 0.93; });
+  rig.arms.forEach(a => { a.sh.rotation.z = 0.07 * a.side; a.el.rotation.x = -0.12; });
+  rig.root.updateMatrixWorld(true);
+  return saved;
+}
+function restoreSnapshot(saved) { for (const [o, q, p] of saved) { o.quaternion.copy(q); o.position.copy(p); } }
+const _hw = new THREE.Vector3();
+function syncPersonModel(rig, dt) {
+  const M = rig.model;
+  if (M.rt) {
+    M.holder.position.y = 0.1 * rig.ground; // imported bodies are fuller than the built-in one: lift a little when sitting on the ground
+    M.rt.update();
+    // keep held objects and masks on the model's hands and head
+    const b = M.rt.bones;
+    for (const a of rig.arms) {
+      const hand = a.side === 1 ? b.handL : b.handR; if (!hand) continue;
+      hand.getWorldPosition(_hw); a.el.updateMatrixWorld(true); a.wrist.position.copy(a.el.worldToLocal(_hw));
+    }
+    if (b.head) { b.head.getWorldPosition(_hw); rig.neck.updateMatrixWorld(true); rig.head.position.copy(rig.neck.worldToLocal(_hw)); }
+  } else {
+    // static statue: turn the whole body a little towards what the head looks at, and breathe
+    const yaw = rig.neck.rotation.y + rig.head.rotation.y;
+    M.holder.rotation.y += (yaw * 0.45 - M.holder.rotation.y) * Math.min(1, dt * 4);
+    M.holder.scale.y = 1 + Math.sin(rig.t * 1.6) * 0.004;
+  }
 }
 
 // Put an object in a person's right hand (e.g. the envelope)
@@ -123,9 +184,16 @@ export function animatePerson(rig, dt, { lookAt = null, talking = false } = {}) 
   rig.t += dt; const t = rig.t, k = Math.min(1, dt * 5);
   // sitting blend
   rig.sit += (rig.sitTarget - rig.sit) * Math.min(1, dt * 4); const S = rig.sit;
-  rig.legs.forEach(l => { l.hip.rotation.x = -1.5 * S; l.knee.rotation.x = 1.5 * S; l.foot.rotation.x = -0.05 * S; });
-  rig.spine.position.y = 0.95 - 0.47 * S + Math.sin(t * 1.6) * 0.004;
-  rig.legs.forEach(l => { l.hip.position.y = 0.93 - 0.47 * S; });
+  // sitting on the ground (legs out in front, leaning back on the hands)
+  rig.ground += (rig.groundTarget - rig.ground) * Math.min(1, dt * 4); const G = rig.ground;
+  // walking: leg and arm swing (set rig.walkTarget 0..1 and move rig.root yourself)
+  rig.walk += (rig.walkTarget - rig.walk) * Math.min(1, dt * 6); const Wk = rig.walk; rig.walkPh += dt * 7.5 * Wk;
+  rig.legs.forEach(l => {
+    const ph = rig.walkPh + (l.side > 0 ? 0 : Math.PI), sw = Math.sin(ph) * 0.45 * Wk;
+    l.hip.rotation.x = -1.5 * S - 1.45 * G + sw; l.knee.rotation.x = 1.5 * S + 0.12 * G + Math.max(0, Math.sin(ph + 1.2)) * 0.7 * Wk; l.foot.rotation.x = -0.05 * S;
+  });
+  rig.spine.position.y = 0.95 - 0.47 * S - 0.86 * G + Math.sin(t * 1.6) * 0.004 + Math.abs(Math.sin(rig.walkPh)) * 0.02 * Wk;
+  rig.legs.forEach(l => { l.hip.position.y = 0.93 - 0.47 * S - 0.86 * G; });
   rig.spine.rotation.x = -0.05 * S; rig.spine.rotation.z = Math.sin(t * 0.4) * 0.012;
   // look at target (yaw/pitch limited), smoothed
   let yaw = 0, pitch = 0;
@@ -154,4 +222,19 @@ export function animatePerson(rig, dt, { lookAt = null, talking = false } = {}) 
   R.sh.rotation.z = 0.07 + 0.1 * rig.give;
   if (rig.wave > 0) { rig.wave -= dt; const w = Math.min(1, rig.wave * 2, (2.2 - rig.wave) * 3); Lf.sh.rotation.z = -2.5 * w - 0.07 * (1 - w); Lf.el.rotation.z = Math.sin(t * 10) * 0.4 * w; Lf.sh.rotation.x = restX; }
   else { Lf.sh.rotation.z += (-0.07 - Lf.sh.rotation.z) * k; Lf.el.rotation.z *= 0.9; Lf.sh.rotation.x = restX - 0.5 * S; Lf.el.rotation.x = -0.12 - 0.6 * S; }
+  // walking arm swing, ground sitting (hands behind on the ground), a hand to the head (headache), a cough
+  if (Wk > 0.01) for (const a of rig.arms) a.sh.rotation.x += -Math.sin(rig.walkPh + (a.side > 0 ? 0 : Math.PI)) * 0.35 * Wk;
+  if (G > 0.01) { rig.spine.rotation.x += -0.25 * G; for (const a of rig.arms) { a.sh.rotation.x = 0.55 * G + a.sh.rotation.x * (1 - G); a.sh.rotation.z = a.side * 0.25 * G + a.sh.rotation.z * (1 - G); a.el.rotation.x = -0.05 * G + a.el.rotation.x * (1 - G); } }
+  rig.holdHead += (rig.holdHeadTarget - rig.holdHead) * Math.min(1, dt * 4); const HH = rig.holdHead;
+  if (HH > 0.01) { Lf.sh.rotation.x = Lf.sh.rotation.x * (1 - HH) - 2.6 * HH; Lf.sh.rotation.z = Lf.sh.rotation.z * (1 - HH) - 0.5 * HH; Lf.el.rotation.x = Lf.el.rotation.x * (1 - HH) - 1.9 * HH; rig.head.rotation.z = Math.sin(t * 1.3) * 0.06 * HH; }
+  if (rig.cough > 0) { rig.cough -= dt; const c = Math.max(0, Math.sin(rig.cough * 18)) * 0.15; rig.spine.rotation.x += c; rig.head.rotation.x += c; }
+  if (rig.model) syncPersonModel(rig, dt);
+}
+// Put an oxygen mask over a person's mouth and nose (emergency drills). Returns the mask.
+export function putOnMask(rig, col = 0xf2b632) {
+  if (rig.mask) return rig.mask;
+  const m = new THREE.Group(); const cup = new THREE.Mesh(new THREE.SphereGeometry(0.05, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), std(col, { roughness: 0.4 })); cup.rotation.x = Math.PI / 2; m.add(cup);
+  const strap = new THREE.Mesh(new THREE.TorusGeometry(0.105, 0.005, 6, 24), std(0x222222)); strap.rotation.y = Math.PI / 2; strap.rotation.z = Math.PI / 2; strap.position.z = -0.08; m.add(strap);
+  const hose = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.25, 8), std(0x2e8a4a)); hose.position.set(0, -0.14, 0.02); m.add(hose);
+  m.position.set(0, -0.035, 0.095); rig.head.add(m); rig.mask = m; return m;
 }

@@ -6,6 +6,7 @@ import { makePerson, animatePerson } from '../models/humans.js';
 import { makePlant, box } from '../models/house.js';
 import { LOOKS } from '../data/people.js';
 import { makeUsable } from '../engine/interact.js';
+import { whenModel, instance, fit, markImported } from '../../assets/models.js';
 
 const FRONT = -20; // building front face (z)
 
@@ -45,6 +46,9 @@ export default {
     for (const x of [-9, 9]) { const l = makeLamppost(); l.position.set(x, 0, 2); l.rotation.y = x < 0 ? Math.PI : 0; scene.add(l); }
     for (const x of [-4.5, 4.5]) { const p = makePlant(2.2); p.position.set(x, 0, FRONT + 5.2); scene.add(p); player.addBox(x - 0.4, x + 0.4, FRONT + 4.8, FRONT + 5.6, 0, 1.5); }
     const f1 = makeFence(44); f1.position.set(0, 0, 16); scene.add(f1);
+    // research greenhouse (imported model) on the lawn beside the plaza
+    whenModel('greenhouse', gltf => { const gh = markImported(fit(instance(gltf), { size: 6.4, by: 'length', rotY: Math.PI / 2 })); gh.position.set(-17.6, 0, 10.2); scene.add(gh); });
+    player.addBox(-20.8, -14.4, 8.6, 11.8, 0, 3.2);
     // plaza bounds
     player.addBox(-22.5, -21.5, -34, 17); player.addBox(21.5, 22.5, -34, 17); player.addBox(-22, 22, 15.6, 16.4);
 

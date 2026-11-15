@@ -15,6 +15,7 @@ import { initCareerMenus, openNewGame, resumeGame, openTrainingModules, openAchi
 import { careerStarted } from './career/state/careerSave.js';
 import { playMusic } from './career/engine/audio.js';
 import { startMenuParticles } from './career/ui/menuFx.js';
+import { preloadModels } from './assets/models.js';
 
 const app = {
   scene: null, textures: {}, previews: {}, mode: 'loading', returnTo: 'menu',
@@ -26,6 +27,7 @@ const app = {
 };
 window.__astrolab = app; // handy for debugging in the console
 app.careerRun = () => careerDebug();
+preloadModels(); // imported GLB models load in the background; scenes use the built-in models until (or unless) they arrive
 
 // ---------------- Error handling ----------------
 let errShown = 0;

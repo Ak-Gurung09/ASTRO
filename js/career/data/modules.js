@@ -14,8 +14,10 @@ export const MODULES = [
   { id: 'equipment', icon: '🎒', name: 'Equipment Management', desc: 'Pack a cargo bag from a manifest under a mass limit, and stow it with labels out.', scene: 'equipment', after: ['emergency'], group: 'physical' },
   { id: 'survival', icon: '🏝️', name: 'Survival & Teamwork', desc: 'Your capsule lands off course. Lead the crew: signal, shelter, water and roles.', scene: 'survival', after: ['equipment'], group: 'physical' },
   { id: 'greenhouse', icon: '🌱', name: 'Space Greenhouse & Life Support', desc: 'Mission GREENHOUSE-01: buy parts, build a greenhouse, run its systems and grow two crops.', scene: 'greenhouse', after: ['survival'] },
-  { id: 'medical', icon: '🧠', name: 'Health & Neuroscience', desc: 'A 3D brain and nervous system, astronaut records and a lunar medical scenario.', scene: 'medical', after: ['survival'] },
+  { id: 'medical', icon: '🧠', name: 'Health & Neuroscience', desc: 'Eye test, migraine triggers, a safe light-sensitivity sim, a hydration challenge and a lunar medical scenario', scene: 'medical', after: ['survival'] },
   { id: 'spacecraft', icon: '🎛️', name: 'Spacecraft Systems', desc: 'Run power, oxygen, pressure, temperature and comms, and diagnose faults.', scene: 'spacecraft', after: ['greenhouse', 'medical'] },
+  { id: 'powerlab', icon: '🔋', name: 'Power & Life Support Lab', desc: 'Wire a habitat power system, replace a blown fuse safely and keep life support alive through a 3-hour shadow. Certifies you on the lunar outpost\'s power kit.', scene: 'powerlab', after: ['spacecraft'] },
+  { id: 'moonpower', icon: '🌒', name: 'Mission: Lunar Outpost Power', desc: 'On the Moon\'s south pole: unfold and aim four solar panels, wire the outpost, and keep the crew safe through a crater-rim shadow.', scene: 'moonpower', after: ['powerlab'] },
   { id: 'robotics', icon: '🦾', name: 'Robotic Arm', desc: 'Drive each joint to capture a floating cargo module and berth it.', scene: 'robotics', after: ['spacecraft'] },
   { id: 'eva', icon: '🛰️', name: 'EVA / Spacewalk', desc: 'Suit up, depressurise the airlock, move by handrails and repair a station antenna.', scene: 'eva', after: ['robotics'] },
   { id: 'launch', icon: '🚀', name: 'Launch & Flight', desc: 'Final checks, countdown, liftoff, ascent and your first orbit.', scene: 'launch', after: ['eva'] }
